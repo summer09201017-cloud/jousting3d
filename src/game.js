@@ -649,6 +649,7 @@ export class JoustingGame {
     this.myQuality = null;
     this.aiStruck = false;
     this.strikeAnimT = 9;
+    this.aiStrikeAnimT = 9;
     this.hitReactT = 9;
     this.aiHitReactT = 9;
     this.placeRiders();
@@ -797,17 +798,24 @@ export class JoustingGame {
     this.time += delta;
     const paused = this.overlay.visible;
 
+    // 交錯慢動作(07-15 bug 修:出槍一眨眼看不到)——gap<7m 進 0.38 倍速,直到錯身
+    const gapNow = this.aiZ - this.myZ;
+    this._slowMo = !paused && this.phase === "charging" && gapNow < 7 ? 0.38 : 1;
+    const sdt = delta * this._slowMo;
+
     if (!paused && this.phase === "charging") {
       const preset = DIFFICULTY_PRESETS[this.difficulty];
       const boosting = this.input.isDown("up") || this.input.isDown("sprint");
       const slowing = this.input.isDown("down");
       const target = preset.baseSpeed + (boosting ? preset.boost : 0) - (slowing ? 2.0 : 0);
-      this.speed += (Math.max(4, target) - this.speed) * Math.min(1, delta * 2.0);
-      this.aiSpeed += (preset.baseSpeed + preset.boost * 0.55 - this.aiSpeed) * Math.min(1, delta * 2.0);
-      this.myZ += this.speed * delta;
-      this.aiZ -= this.aiSpeed * delta;
-      this.gallopT += delta * (this.speed / 8);
-      this.aiGallopT += delta * (this.aiSpeed / 8);
+      this.speed += (Math.max(4, target) - this.speed) * Math.min(1, sdt * 2.0);
+      this.aiSpeed += (preset.baseSpeed + preset.boost * 0.55 - this.aiSpeed) * Math.min(1, sdt * 2.0);
+      this.myZ += this.speed * sdt;
+      this.aiZ -= this.aiSpeed * sdt;
+      this.gallopT += sdt * (this.speed / 8);
+      this.aiGallopT += sdt * (this.aiSpeed / 8);
+      // AI 出槍演出(判定仍在 resolvePass;這裡只演)
+      if (this.aiStrikeAnimT > 1 && gapNow <= 3.4) this.aiStrikeAnimT = 0;
 
       // 交錯瞬間=結算(判定=畫面:分數在出槍當下已定,這裡演出來)
       if (this.aiZ - this.myZ <= 0.4) {
@@ -836,7 +844,7 @@ export class JoustingGame {
     }
 
     // 擊中閃光
-    this.hitFlashT += delta;
+    this.hitFlashT += sdt;
     if (this.hitFlashT < 0.5) {
       this.hitFlash.material.opacity = 0.9 * (1 - this.hitFlashT / 0.5);
       this.hitFlash.scale.setScalar(1 + this.hitFlashT * 2.2);
@@ -844,9 +852,10 @@ export class JoustingGame {
     } else {
       this.hitFlash.material.opacity = 0;
     }
-    this.hitReactT += delta;
-    this.aiHitReactT += delta;
-    this.strikeAnimT += delta;
+    this.hitReactT += sdt;
+    this.aiHitReactT += sdt;
+    this.strikeAnimT += sdt;
+    this.aiStrikeAnimT = (this.aiStrikeAnimT ?? 9) + sdt;
 
     this.handleKeys();
     this.updatePoses();
@@ -894,17 +903,27 @@ export class JoustingGame {
     let thrust = 0;
     if (this.strikeAnimT < 0.16) thrust = this.strikeAnimT / 0.16;
     else if (this.strikeAnimT < 0.45) thrust = 1 - (this.strikeAnimT - 0.16) / 0.29;
-    this.me.rightArm.pivot.rotation.x = couch || this.armed ? -1.35 - thrust * 0.25 : -1.05;
-    this.me.rightArm.joint.rotation.x = couch || this.armed ? -0.15 - thrust * 0.2 : -0.6;
+    this.me.rightArm.pivot.rotation.x = couch || this.armed ? -1.5 - thrust * 0.4 : -1.05;
+    this.me.rightArm.joint.rotation.x = couch || this.armed ? -0.1 - thrust * 0.25 : -0.6;
     this.me.leftArm.pivot.rotation.x = -0.9; // 持盾護胸
     this.me.leftArm.pivot.rotation.z = 0.35;
     this.me.rig.rotation.x = this.hitReactT < 0.8 ? -0.55 * (1 - this.hitReactT / 0.8) : (this.phase === "charging" ? 0.12 : 0);
-    // 對手鏡像
+    // 槍瞄過分隔柵(couch=斜指對手)+出槍瞬間整枝前刺(07-15 bug 修:原本只轉手臂看不見)
+    this.me.rig.rotation.y = couch || this.armed ? -0.22 : 0;
+    this.myGear.lance.rotation.y = couch || this.armed ? -0.3 : 0;
+    this.myGear.lance.position.z = 0.1 + thrust * 1.0;
+    // 對手鏡像(含出槍演出)
     const aiCouch = this.phase === "charging" && gap <= ARM_RANGE;
-    this.ai.rightArm.pivot.rotation.x = aiCouch ? -1.35 : -1.05;
-    this.ai.rightArm.joint.rotation.x = aiCouch ? -0.15 : -0.6;
+    let aiThrust = 0;
+    if (this.aiStrikeAnimT < 0.16) aiThrust = this.aiStrikeAnimT / 0.16;
+    else if (this.aiStrikeAnimT < 0.45) aiThrust = 1 - (this.aiStrikeAnimT - 0.16) / 0.29;
+    this.ai.rightArm.pivot.rotation.x = aiCouch ? -1.5 - aiThrust * 0.4 : -1.05;
+    this.ai.rightArm.joint.rotation.x = aiCouch ? -0.1 - aiThrust * 0.25 : -0.6;
     this.ai.leftArm.pivot.rotation.x = -0.9;
     this.ai.leftArm.pivot.rotation.z = 0.35;
+    this.ai.rig.rotation.y = aiCouch ? -0.22 : 0;
+    this.aiGear.lance.rotation.y = aiCouch ? -0.3 : 0;
+    this.aiGear.lance.position.z = 0.1 + aiThrust * 1.0;
     this.ai.rig.rotation.x = this.aiHitReactT < 0.8 ? -0.55 * (1 - this.aiHitReactT / 0.8) : (this.phase === "charging" ? 0.12 : 0);
   }
 
@@ -915,6 +934,11 @@ export class JoustingGame {
       const a = this.time * 0.08;
       desiredPos = new THREE.Vector3(Math.cos(a) * 34, 11, Math.sin(a) * 34);
       desiredLook = new THREE.Vector3(0, 1.2, 0);
+    } else if ((this.phase === "charging" || this.phase === "reset") && Math.abs(this.aiZ - this.myZ) < 9) {
+      // 交錯電影鏡頭(慢動作配側面近景:兩騎+出槍+盾閃全入鏡)
+      const mid = (this.myZ + this.aiZ) / 2;
+      desiredPos = new THREE.Vector3(9.5, 2.7, mid + 1);
+      desiredLook = new THREE.Vector3(0, 1.9, mid);
     } else if (this.cameraView === 0) {
       // 跟隨玩家後上方,看向對手來向
       desiredPos = new THREE.Vector3(LANE_X + 2.4, 4.2, this.myZ - 8.5);
@@ -931,7 +955,7 @@ export class JoustingGame {
       desiredPos = new THREE.Vector3(LANE_X, 2.9, this.myZ - 0.4);
       desiredLook = new THREE.Vector3(-LANE_X * 0.4, 1.8, this.myZ + 14);
     }
-    const k = 1 - Math.exp(-delta * 3.4);
+    const k = 1 - Math.exp(-delta * (Math.abs(this.aiZ - this.myZ) < 9 && this.phase !== "menu" ? 6.5 : 3.4));
     this.camPos.lerp(desiredPos, k);
     this.camLook.lerp(desiredLook, k);
     this.camera.position.copy(this.camPos);
