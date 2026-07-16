@@ -742,3 +742,15 @@ button.active {
 /* [hidden] 修正:面板 display:flex 會蓋過 UA 的 [hidden]{display:none}(joash 同款) */
 .power-panel-big[hidden], .strike-panel[hidden] { display: none; }
 .big-fill.full { background: linear-gradient(90deg, #7de08c, #3ddc75); box-shadow: 0 0 16px rgba(125,224,140,.9); }
+
+/* 07-16 二修:1-8 武器條(bigPower 上方,點擊可切換;投影可讀) */
+.weapon-bar { position: absolute; left: 50%; bottom: 138px; transform: translateX(-50%); display: flex; gap: 6px; z-index: 41; }
+.weapon-chip { padding: 6px 10px; border-radius: 10px; background: rgba(8, 14, 26, 0.78); border: 1.5px solid rgba(255, 255, 255, 0.16); color: #cfe3f5; font-size: 14px; font-weight: 700; cursor: pointer; white-space: nowrap; }
+.weapon-chip b { color: #ffd24a; margin-right: 4px; font-size: 13px; }
+.weapon-chip.active { background: rgba(255, 210, 74, 0.92); border-color: #ffd24a; color: #1a2333; box-shadow: 0 0 14px rgba(255, 210, 74, 0.7); }
+.weapon-chip.active b { color: #7a4a00; }
+.weapon-bar[hidden] { display: none; }
+@media (max-width: 720px) {
+  .weapon-bar { bottom: 128px; gap: 4px; }
+  .weapon-chip { padding: 5px 7px; font-size: 12px; }
+}

@@ -126,8 +126,9 @@
           <p>出手: 點畫面或空白鍵</p>
           <p>前進 / 後退: W / S(↑ / ↓)</p>
           <p>左轉 / 右轉: A / D(← / →)</p>
-          <p>換武器: 1-8 直選,Q / Tab 循環</p>
-          <p>衝刺: Shift｜視角: V｜暫停: Esc / P</p>
+          <p>換武器: 1-8 直選,Q / Tab 循環,或點畫面下方武器條</p>
+          <p>衝刺(逃跑): 按住 Shift / 衝刺鈕——比對手快!</p>
+          <p>視角: V｜暫停: Esc / P</p>
         </div>
       </aside>
 
@@ -140,6 +141,7 @@
         </div>
         <div class="action-pad">
           <button data-action="shoot" class="shoot">出手</button>
+          <button data-action="sprint" class="sprint">衝刺</button>
           <button data-action="switch">換武器</button>
           <button data-action="camera">視角</button>
         </div>
@@ -249,6 +251,16 @@
       </div>
     </div>
 
+      <div class="weapon-bar" id="weaponBar" hidden>
+        <button class="weapon-chip" data-weapon="lance"><b>1</b>長槍</button>
+        <button class="weapon-chip" data-weapon="spear"><b>2</b>長矛</button>
+        <button class="weapon-chip" data-weapon="greatblade"><b>3</b>大刀</button>
+        <button class="weapon-chip" data-weapon="sword"><b>4</b>劍</button>
+        <button class="weapon-chip" data-weapon="saber"><b>5</b>彎刀</button>
+        <button class="weapon-chip" data-weapon="rapier"><b>6</b>西洋劍</button>
+        <button class="weapon-chip" data-weapon="bow"><b>7</b>弓箭</button>
+        <button class="weapon-chip" data-weapon="greenballs"><b>8</b>鋼球</button>
+      </div>
       <div class="power-panel-big" id="bigPower" hidden><span id="bigPowerLabel">出手時機</span><div class="big-track"><div class="big-fill" id="bigPowerFill"></div></div></div>
     <script type="module" src="/src/main.js"></script>
   </body>

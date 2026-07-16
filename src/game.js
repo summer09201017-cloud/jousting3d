@@ -12,12 +12,13 @@ import { loadSettings, saveSettings, loadSavedGame, saveGameState } from "./stor
 // ---------- 可調量值 ----------
 // maxFwd=馬最高前速;turnRate=轉向速率;aiSkill=AI 出手命中率;aiCd=AI 冷卻倍率;
 // aiDmg=AI 傷害倍率;aiSpd=AI 馬速倍率;assist=兒童輔助(加傷害+放寬命中幾何)
+// boost=衝刺加速(玩家限定,AI 沒有——按住 Shift/衝刺鈕逃跑用,07-16 使用者點名要跑更快)
 export const DIFFICULTY_PRESETS = {
-  kids: { maxFwd: 6.5, boost: 2.0, turnRate: 2.1, aiSkill: 0.25, aiCd: 1.9, aiDmg: 0.45, aiSpd: 0.75, assist: 0.5 },
-  child: { maxFwd: 7.5, boost: 2.6, turnRate: 2.05, aiSkill: 0.4, aiCd: 1.5, aiDmg: 0.65, aiSpd: 0.85, assist: 0.3 },
-  easy: { maxFwd: 8.5, boost: 3.2, turnRate: 1.95, aiSkill: 0.55, aiCd: 1.25, aiDmg: 0.8, aiSpd: 0.92, assist: 0.15 },
-  normal: { maxFwd: 9.5, boost: 4.0, turnRate: 1.85, aiSkill: 0.68, aiCd: 1.05, aiDmg: 0.95, aiSpd: 1.0, assist: 0 },
-  hard: { maxFwd: 10.5, boost: 4.6, turnRate: 1.8, aiSkill: 0.82, aiCd: 0.85, aiDmg: 1.1, aiSpd: 1.06, assist: 0 },
+  kids: { maxFwd: 6.5, boost: 4.5, turnRate: 2.1, aiSkill: 0.25, aiCd: 1.9, aiDmg: 0.45, aiSpd: 0.75, assist: 0.5 },
+  child: { maxFwd: 7.5, boost: 5.2, turnRate: 2.05, aiSkill: 0.4, aiCd: 1.5, aiDmg: 0.65, aiSpd: 0.85, assist: 0.3 },
+  easy: { maxFwd: 8.5, boost: 6.0, turnRate: 1.95, aiSkill: 0.55, aiCd: 1.25, aiDmg: 0.8, aiSpd: 0.92, assist: 0.15 },
+  normal: { maxFwd: 9.5, boost: 7.0, turnRate: 1.85, aiSkill: 0.68, aiCd: 1.05, aiDmg: 0.95, aiSpd: 1.0, assist: 0 },
+  hard: { maxFwd: 10.5, boost: 7.5, turnRate: 1.8, aiSkill: 0.82, aiCd: 0.85, aiDmg: 1.1, aiSpd: 1.06, assist: 0 },
 };
 
 export const DIFFICULTY_LABELS = {
@@ -58,16 +59,21 @@ export function getModeConfig(modeId) {
 // ---------- 八般武器(資料驅動;reach=出手距離、arc=正面判定角、cd=冷卻秒) ----------
 export const WEAPON_ORDER = ["lance", "spear", "greatblade", "sword", "saber", "rapier", "bow", "greenballs"];
 
+// swing=近戰揮擊型態(07-16 使用者點名動作要大):chop=180°舉過頭直劈、spin=360°迴旋橫掃、
+// lunge=大幅回拉前刺;傷害在揮到對方身上那一刻(CONTACT_AT)才結算,判定仍在按下當下。
 export const WEAPONS = {
-  lance: { label: "騎士長槍", short: "長槍", reach: 3.4, dmg: 16, cd: 1.6, arc: 0.55, chargeBonus: 0.9, hint: "衝鋒加成最大,慢而重" },
-  spear: { label: "長矛", short: "長矛", reach: 3.0, dmg: 12, cd: 1.1, arc: 0.65, chargeBonus: 0.5, hint: "長距直刺,攻守兼備" },
-  greatblade: { label: "青龍大刀", short: "大刀", reach: 2.5, dmg: 15, cd: 1.5, arc: 1.6, hint: "橫掃大弧,重擊" },
-  sword: { label: "騎士劍", short: "劍", reach: 2.0, dmg: 10, cd: 0.8, arc: 1.25, hint: "均衡好上手" },
-  saber: { label: "彎刀", short: "彎刀", reach: 1.9, dmg: 8, cd: 0.55, arc: 1.35, hint: "出手飛快的連擊" },
-  rapier: { label: "西洋劍", short: "西洋劍", reach: 2.2, dmg: 6, cd: 0.4, arc: 0.7, hint: "最快的點刺" },
+  lance: { label: "騎士長槍", short: "長槍", reach: 3.4, dmg: 16, cd: 1.6, arc: 0.55, chargeBonus: 0.9, swing: "lunge", hint: "衝鋒加成最大,慢而重" },
+  spear: { label: "長矛", short: "長矛", reach: 3.0, dmg: 12, cd: 1.1, arc: 0.65, chargeBonus: 0.5, swing: "lunge", hint: "長距直刺,攻守兼備" },
+  greatblade: { label: "青龍大刀", short: "大刀", reach: 2.5, dmg: 15, cd: 1.5, arc: 1.6, swing: "spin", hint: "360° 迴旋橫掃,重擊" },
+  sword: { label: "騎士劍", short: "劍", reach: 2.0, dmg: 10, cd: 0.8, arc: 1.25, swing: "chop", hint: "180° 直劈,均衡好上手" },
+  saber: { label: "彎刀", short: "彎刀", reach: 1.9, dmg: 8, cd: 0.55, arc: 1.35, swing: "chop", hint: "180° 快劈連擊" },
+  rapier: { label: "西洋劍", short: "西洋劍", reach: 2.2, dmg: 6, cd: 0.4, arc: 0.7, swing: "lunge", hint: "最快的點刺" },
   bow: { label: "弓箭", short: "弓箭", ranged: true, dmg: 9, cd: 1.5, projSpeed: 30, maxRange: 45, hint: "遠距狙擊(鈍頭箭)" },
   greenballs: { label: "雙綠鋼球", short: "鋼球", ranged: true, dmg: 6, cd: 2.4, projSpeed: 19, maxRange: 30, stun: 1.1, volley: 2, hint: "兩顆連投,命中讓對手暈一下" },
 };
+
+// 揮擊「接觸瞬間」(秒)——傷害/盾閃/慢動作在這一刻才發生,看得見打到身上
+const CONTACT_AT = { chop: 0.24, spin: 0.3, lunge: 0.22 };
 
 // ---------- 競技場常數 ----------
 const ARENA_HALF = 25; // 可騎乘範圍(±m)
@@ -570,6 +576,8 @@ export class JoustingGame {
     this.roundNo = 0; // 「回合」=雙方出手總次數(大戰三百回合!)
     this.lastHit = null; // {who, dmg, weapon} 顯示上一擊
     this.projectiles = [];
+    this._pendingStrikes = []; // 近戰接觸瞬間結算佇列
+    this._shotQueue = [];
     this.hitCamT = 9; // 命中慢動作/特寫計時
     this.endT = -1; // KO 落馬演出 → 終場
 
@@ -774,6 +782,7 @@ export class JoustingGame {
     for (const p of this.projectiles) this.scene.remove(p.mesh);
     this.projectiles = [];
     this._shotQueue = [];
+    this._pendingStrikes = [];
     this.setRiderWeapon(this.my, this.weaponId);
     this.setRiderWeapon(this.foe, WEAPON_ORDER[Math.floor(Math.random() * 6)]); // AI 開場拿一把近戰
     if (this.foe.brain) {
@@ -921,7 +930,13 @@ export class JoustingGame {
       let dmg = w.dmg;
       if (w.chargeBonus) dmg *= 1 + w.chargeBonus * clamp(Math.abs(rider.speed) / preset.maxFwd, 0, 1);
       dmg *= isPlayer ? 1 + assist * 0.6 : preset.aiDmg;
-      this.applyHit(target, Math.round(dmg), { who: isPlayer ? "me" : "ai", weapon: w, stun: 0 });
+      // 判定在按下當下,傷害延到「揮到對方身上」的接觸瞬間才結算(動作看得見打中)
+      this._pendingStrikes.push({
+        target,
+        dmg: Math.round(dmg),
+        opts: { who: isPlayer ? "me" : "ai", weapon: w, stun: 0 },
+        t: CONTACT_AT[w.swing] || 0.2,
+      });
     } else {
       this.emitEvent("miss", { who: isPlayer ? "me" : "ai" });
       if (isPlayer) {
@@ -1288,6 +1303,13 @@ export class JoustingGame {
   }
 
   updateProjectiles(dt) {
+    // 近戰接觸瞬間結算(揮擊掃到對方身上那一刻)
+    if (this._pendingStrikes && this._pendingStrikes.length) {
+      for (const s of this._pendingStrikes) s.t -= dt;
+      const landed = this._pendingStrikes.filter((s) => s.t <= 0);
+      this._pendingStrikes = this._pendingStrikes.filter((s) => s.t > 0);
+      for (const s of landed) this.applyHit(s.target, s.dmg, s.opts);
+    }
     // 延遲發射佇列(雙鋼球第二顆)
     if (this._shotQueue && this._shotQueue.length) {
       for (const shot of this._shotQueue) shot.t -= dt;
@@ -1348,30 +1370,75 @@ export class JoustingGame {
       const dist = rider.pos.distanceTo(other.pos);
       const engaged = this.phase === "battle" && dist < 14;
 
-      // 出手動畫:0.16s 前刺/揮出 → 0.29s 收回
-      let thrust = 0;
-      if (rider.strikeT < 0.16) thrust = rider.strikeT / 0.16;
-      else if (rider.strikeT < 0.45) thrust = 1 - (rider.strikeT - 0.16) / 0.29;
-
-      if (w.ranged) {
-        // 遠程:手臂抬高瞄準,出手時輕振
-        person.rightArm.pivot.rotation.x = -1.35 - thrust * 0.2;
-        person.rightArm.joint.rotation.x = -0.25;
-      } else {
-        person.rightArm.pivot.rotation.x = (engaged ? -1.35 : -1.05) - thrust * 0.5;
-        person.rightArm.joint.rotation.x = (engaged ? -0.15 : -0.6) - thrust * 0.25;
-      }
-      // 大刀/劍類:出手時上身帶一點側轉(揮砍感)
-      const swing = !w.ranged && !w.chargeBonus ? thrust * 0.5 : 0;
-      person.rig.rotation.y = -swing;
-      // 武器前送(刺擊類整枝前刺)
+      // —— 大揮擊動畫(07-16 二修:動作要大、看得見打到身上) ——
+      // chop=180°舉過頭直劈;spin=360°上身迴旋橫掃;lunge=大幅回拉整枝前刺
+      const st = rider.strikeT;
       const model = rider.gear.weapons[rider.weaponId];
-      if (model) model.position.z = 0.1 + (w.chargeBonus ? thrust * 1.0 : thrust * 0.4);
+      let armX = engaged ? -1.35 : -1.05; // 備戰持械位
+      let armJ = engaged ? -0.15 : -0.6;
+      let rigY = 0; // 上身水平旋轉(迴旋斬用)
+      let strikeLean = 0; // 上身前壓(力道感)
+      let weaponZ = 0.1;
+      if (w.ranged) {
+        armX = -1.35;
+        armJ = -0.25;
+        if (st < 0.45) armX -= 0.2 * (st < 0.16 ? st / 0.16 : 1 - (st - 0.16) / 0.29);
+      } else if (st < 0.6) {
+        if (w.swing === "chop") {
+          if (st < 0.12) { // 舉過頭後方蓄力
+            const k = st / 0.12;
+            armX = -1.35 - k * 1.6;
+          } else if (st < 0.3) { // 180° 全弧直劈到身前下方
+            const k = (st - 0.12) / 0.18;
+            armX = -2.95 + k * 2.6;
+            armJ = -0.1 - k * 0.2;
+            strikeLean = k * 0.3;
+          } else { // 收回備戰位
+            const k = (st - 0.3) / 0.3;
+            armX = -0.35 - k * 1.0;
+            armJ = -0.3 + k * 0.15;
+            strikeLean = 0.3 * (1 - k);
+          }
+        } else if (w.swing === "spin") {
+          armX = -1.5; // 手臂平舉,大刀橫置
+          armJ = 0;
+          if (st < 0.12) { // 起手反擰
+            rigY = -(st / 0.12) * 0.5;
+          } else if (st < 0.45) { // 上身整圈 360° 迴旋橫掃
+            rigY = -0.5 - ((st - 0.12) / 0.33) * Math.PI * 2;
+            strikeLean = 0.15;
+          } else { // 收勢(−0.5−2π 與 −0.5 同向,直接從 −0.5 轉回 0)
+            const k = (st - 0.45) / 0.15;
+            rigY = -0.5 * (1 - k);
+          }
+        } else { // lunge:回拉蓄力 → 整枝大幅前刺 → 收回
+          if (st < 0.1) {
+            const k = st / 0.1;
+            weaponZ = 0.1 - k * 0.45;
+            armX = -1.35 + k * 0.25;
+          } else if (st < 0.26) {
+            const k = (st - 0.1) / 0.16;
+            weaponZ = -0.35 + k * 2.35; // 前送超過 2m,整枝刺出去
+            armX = -1.5;
+            armJ = -0.05;
+            strikeLean = k * 0.35;
+          } else {
+            const k = (st - 0.26) / 0.34;
+            weaponZ = 2.0 - k * 1.9;
+            armX = -1.4;
+            strikeLean = 0.35 * (1 - k);
+          }
+        }
+      }
+      person.rightArm.pivot.rotation.x = armX;
+      person.rightArm.joint.rotation.x = armJ;
+      person.rig.rotation.y = rigY;
+      if (model) model.position.z = weaponZ;
 
       person.leftArm.pivot.rotation.x = -0.9; // 持盾護胸
       person.leftArm.pivot.rotation.z = 0.35;
 
-      // 被擊中=後仰苦臉;暈眩=左右搖晃
+      // 被擊中=大後仰苦臉;暈眩=左右搖晃
       const stunned = rider.stunT < this._stunDur();
       if (rider.koT >= 0) {
         // 溫柔落馬:側滑下馬(演出,不受傷)
@@ -1384,7 +1451,9 @@ export class JoustingGame {
         person.rig.rotation.x = 0.1;
       } else {
         person.rig.rotation.z = 0;
-        person.rig.rotation.x = rider.hitT < 0.8 ? -0.55 * (1 - rider.hitT / 0.8) : (Math.abs(rider.speed) > 4 ? 0.12 : 0);
+        person.rig.rotation.x = rider.hitT < 0.8
+          ? -0.8 * (1 - rider.hitT / 0.8)
+          : Math.max(strikeLean, Math.abs(rider.speed) > 4 ? 0.12 : 0);
       }
     }
   }
@@ -1449,6 +1518,7 @@ export class JoustingGame {
       message: this.message,
       speed01: clamp(Math.abs(this.my.speed) / (preset.maxFwd + preset.boost), 0, 1),
       speedText: `${(this.my.speed * 3.6).toFixed(0)} km/h`,
+      weaponId: this.my.weaponId,
       weaponLabel: w.label,
       weaponShort: w.short,
       weaponHint: w.hint,

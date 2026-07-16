@@ -11,7 +11,12 @@
   「回合」=雙方出手總次數。KO=溫柔落馬演出(koT 側滑 1.2s,無流血)→ endT 1.6s 結算。
 - 八般武器 WEAPONS 資料驅動(reach/dmg/cd/arc;弓箭+雙綠鋼球 ranged 有 projSpeed/maxRange,
   鋼球 volley=2+stun 1.1s):長槍(chargeBonus 0.9 衝鋒加成)/長矛/青龍大刀/騎士劍/彎刀/西洋劍/
-  弓箭/雙綠鋼球。1-8 直選、Q/Tab 循環、戰鬥中換=0.35s 硬直;模型全掛右手 visible 切換。
+  弓箭/雙綠鋼球。1-8 直選、Q/Tab 循環、點畫面下方武器條、戰鬥中換=0.35s 硬直;模型掛右手 visible 切換。
+- 大揮擊(07-16 二修):WEAPONS.swing 三型——chop=180°舉過頭直劈(劍/彎刀)、spin=360°上身
+  迴旋橫掃(大刀)、lunge=回拉+整枝前刺 2m+(長槍/長矛/西洋劍);判定仍在按下當下,傷害延到
+  CONTACT_AT(0.22-0.3s)「揮到對方身上」瞬間結算(_pendingStrikes 佇列)。
+- 衝刺=玩家限定逃跑鍵(Shift/衝刺鈕,boost 4.5-7.5 遠超 AI 馬速)——AI 沒有衝刺,拉開距離
+  的反制是 AI 會換弓箭/鋼球。
 - 判定=畫面(鐵則4):近戰=距離(reach+BODY_REACH)+朝向(arc)幾何判定;AI 另過 aiSkill+0.18
   命中門檻(擬人失手)。投射物 projectiles 陣列,玩家自動輔瞄+預判,AI 依 aiSkill 加誤差。
 - AI 三腦(npc-ai-kit):走位(近戰追擊/遠程保持 8-16m 繞圈/35% 得手後退開)+換武器

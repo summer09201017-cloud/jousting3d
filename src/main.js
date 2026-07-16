@@ -46,6 +46,7 @@ const ui = {
   weaponSelect: document.querySelector("#weaponSelect"),
   weaponSideLabel: document.querySelector("#weaponSideLabel"),
   bigPowerLabel: document.querySelector("#bigPowerLabel"),
+  weaponBar: document.querySelector("#weaponBar"),
   audioSelect: document.querySelector("#audioSelect"),
   modeMetaTitle: document.querySelector("#modeMetaTitle"),
   modeMetaGoal: document.querySelector("#modeMetaGoal"),
@@ -254,6 +255,15 @@ game.onHudUpdate = (state) => {
   setMeterFill(ui.speedMeterFill, state.speed01);
   ui.windowValue.textContent = state.weaponReady ? (state.inReach ? "可出手!" : "冷卻好了,靠近!") : "冷卻中…";
   setMeterFill(ui.windowFill, state.weaponReady01);
+  { // 1-8 武器條:出戰準備+激戰中顯示,高亮當前武器
+    const inFight = state.phaseLabel === "激戰中" || state.phaseLabel === "出戰準備";
+    ui.weaponBar.hidden = !inFight;
+    if (inFight) {
+      for (const chip of ui.weaponBar.querySelectorAll(".weapon-chip")) {
+        chip.classList.toggle("active", chip.dataset.weapon === state.weaponId);
+      }
+    }
+  }
   { // 中下方大出手條:戰鬥中顯示;滿+夠近=發光
     const bp = document.getElementById("bigPower"), bf = document.getElementById("bigPowerFill");
     if (bp) {
@@ -299,6 +309,13 @@ ui.weaponSelect.addEventListener("change", (event) => {
   selectedWeapon = event.target.value;
   game.setPlayerWeapon(selectedWeapon, false);
   persistSettings();
+});
+
+ui.weaponBar.addEventListener("click", (event) => {
+  const chip = event.target.closest(".weapon-chip");
+  if (!chip) return;
+  unlockAudio();
+  game.setPlayerWeapon(chip.dataset.weapon);
 });
 
 ui.audioSelect.addEventListener("change", (event) => {
