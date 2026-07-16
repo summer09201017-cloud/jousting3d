@@ -194,6 +194,18 @@ function handleGameEvent(event) {
       }
       break;
     }
+    case "leap": {
+      audio.swish();
+      audio.vibrate([26, 14, 30]);
+      pushCommentary("跳殺——飛身躍向對手!", "hot", "跳殺,從天而降!");
+      break;
+    }
+    case "dash": {
+      audio.swish();
+      audio.vibrate([20, 10, 40]);
+      pushCommentary("飛殺——閃電突進!", "hot", "飛殺,快如閃電!");
+      break;
+    }
     case "ai-charging": {
       audio.rebound();
       pushCommentary("對手在蓄力大招——快閃開或打斷他!", "cool", "對手在蓄力,快閃開!");

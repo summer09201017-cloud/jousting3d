@@ -85,6 +85,14 @@ const WAVE_COLORS = { chop: 0xfff3b0, spin: 0xff9a3d, lunge: 0x6fd8ff, bow: 0xff
 // 自動把身體轉向對手;出手瞬間在攻距內更直接轉身面對再判定。
 const AUTO_FACE_RANGE = 12;
 
+// 突進技(07-16 使用者點名):衝刺 ≥SPRINT_ARM 秒後按出手——
+// 對手在遠距帶=「跳殺」(拋物線飛身躍撲,落地斬 1.6x);近距帶=「飛殺」(比衝刺更快的
+// 1.8x 爆發突進,接觸斬 1.5x)。共用 TECH_CD 冷卻;玩家限定。
+const SPRINT_ARM = 0.35;
+const TECH_CD = 3.5;
+const LEAP_RANGE = [8, 16]; // 跳殺距離帶
+const DASH_RANGE = [3, 8]; // 飛殺距離帶
+
 // ---------- 競技場常數 ----------
 const ARENA_HALF = 25; // 可騎乘範圍(±m)
 const BODY_REACH = 1.1; // 馬身+臂展的基礎出手距離
@@ -774,6 +782,7 @@ export class JoustingGame {
       horse, person, gear, chargeRing,
       pos: new THREE.Vector3(), heading: 0, speed: 0,
       hp: 100, weaponId: "lance", cd: 0, chargeT: -1,
+      sprintT: 0, techCd: 0, leap: null, dash: null, airY: 0,
       strikeT: 9, hitT: 9, stunT: 9, koT: -1, gallopT: 0,
     };
   }
@@ -791,6 +800,11 @@ export class JoustingGame {
       rider.stunT = 9;
       rider.koT = -1;
       rider.chargeT = -1;
+      rider.sprintT = 0;
+      rider.techCd = 0;
+      rider.leap = null;
+      rider.dash = null;
+      rider.airY = 0;
       rider.person.group.rotation.z = 0;
       rider.person.group.position.set(0, 0.82, 0.12);
     }
@@ -820,7 +834,7 @@ export class JoustingGame {
 
   syncRiderTransforms() {
     for (const rider of [this.my, this.foe]) {
-      rider.horse.group.position.set(rider.pos.x, 0, rider.pos.z);
+      rider.horse.group.position.set(rider.pos.x, rider.airY || 0, rider.pos.z);
       rider.horse.group.rotation.y = rider.heading;
     }
   }
@@ -873,7 +887,7 @@ export class JoustingGame {
     this.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
   }
 
-  // 按下出手:開戰/開始蓄力(短按放開=普攻,長按=大招)
+  // 按下出手:開戰/突進技(衝刺中)/開始蓄力(短按放開=普攻,長按=大招)
   _shootPress() {
     if (this.overlay.visible) return;
     if (this.phase === "gate") {
@@ -881,8 +895,110 @@ export class JoustingGame {
       return;
     }
     if (this.phase !== "battle" || this.my.koT >= 0 || this.endT >= 0) return;
+    if (this.my.leap || this.my.dash) return;
     if (this.my.cd > 0 || this.my.stunT < this._stunDur()) return;
+    // 衝刺一小段後按出手=突進技:遠=跳殺、近=飛殺
+    if (this.my.sprintT >= SPRINT_ARM && this.my.techCd <= 0 && this.foe.koT < 0) {
+      const dist = this.my.pos.distanceTo(this.foe.pos);
+      if (dist >= DASH_RANGE[0] && dist < DASH_RANGE[1]) {
+        this._startDash(this.my);
+        return;
+      }
+      if (dist >= LEAP_RANGE[0] && dist <= LEAP_RANGE[1]) {
+        this._startLeap(this.my);
+        return;
+      }
+    }
     if (this.my.chargeT < 0) this.my.chargeT = 0;
+  }
+
+  // ---------- 突進技:跳殺(躍撲落地斬)/飛殺(爆發突進斬) ----------
+  _startLeap(rider) {
+    const target = this.foe;
+    const dist = rider.pos.distanceTo(target.pos);
+    const dur = 0.5 + dist * 0.015;
+    // 預判對手移動,落點停在對手身前一步
+    const to = target.pos.clone().addScaledVector(
+      new THREE.Vector3(Math.sin(target.heading), 0, Math.cos(target.heading)),
+      target.speed * dur * 0.7,
+    );
+    to.x = clamp(to.x, -ARENA_HALF, ARENA_HALF);
+    to.z = clamp(to.z, -ARENA_HALF, ARENA_HALF);
+    const dir = to.clone().sub(rider.pos).normalize();
+    to.addScaledVector(dir, -1.5);
+    rider.leap = { t: 0, dur, from: rider.pos.clone(), to, h: 2.4 };
+    rider.heading = Math.atan2(to.x - rider.pos.x, to.z - rider.pos.z);
+    rider.chargeT = -1;
+    rider.sprintT = 0;
+    rider.techCd = TECH_CD;
+    this.roundNo += 1;
+    this.emitEvent("leap", { who: "me" });
+    this.message = "跳殺——飛身躍向對手!";
+    this.pushHud();
+  }
+
+  _landLeap(rider) {
+    rider.leap = null;
+    rider.airY = 0;
+    rider.speed *= 0.5;
+    rider.strikeT = 0; // 落地斬演出
+    const w = WEAPONS[rider.weaponId];
+    const preset = DIFFICULTY_PRESETS[this.difficulty];
+    const target = this.foe;
+    const dist = rider.pos.distanceTo(target.pos);
+    rider.heading = Math.atan2(target.pos.x - rider.pos.x, target.pos.z - rider.pos.z);
+    rider.cd = w.cd * 1.4;
+    const reach = Math.max(w.reach, 2.0) + BODY_REACH + 1.0;
+    if (dist <= reach && target.koT < 0) {
+      const dmg = w.dmg * 1.6 * (1 + preset.assist * 0.6);
+      this._pendingStrikes.push({
+        target,
+        dmg: Math.round(dmg),
+        opts: { who: "me", weapon: { label: `${w.label}跳殺`, short: "跳殺" }, stun: 0 },
+        t: 0.12,
+      });
+    } else {
+      this.emitEvent("miss", { who: "me" });
+      this.message = "跳殺落空——再抓準一點起跳!";
+    }
+    this.pushHud();
+  }
+
+  _startDash(rider) {
+    const preset = DIFFICULTY_PRESETS[this.difficulty];
+    const target = this.foe;
+    rider.heading = Math.atan2(target.pos.x - rider.pos.x, target.pos.z - rider.pos.z);
+    rider.dash = { t: 0, dur: 0.55, speed: (preset.maxFwd + preset.boost) * 1.8 };
+    rider.chargeT = -1;
+    rider.sprintT = 0;
+    rider.techCd = TECH_CD;
+    this.roundNo += 1;
+    this.emitEvent("dash", { who: "me" });
+    this.message = "飛殺——閃電突進!";
+    this.pushHud();
+  }
+
+  _landDash(rider, dist) {
+    rider.dash = null;
+    rider.strikeT = 0;
+    const w = WEAPONS[rider.weaponId];
+    const preset = DIFFICULTY_PRESETS[this.difficulty];
+    const target = this.foe;
+    rider.cd = w.cd * 1.3;
+    if (dist <= 2.4 && target.koT < 0) {
+      rider.speed *= 0.35;
+      const dmg = w.dmg * 1.5 * (1 + preset.assist * 0.6);
+      this._pendingStrikes.push({
+        target,
+        dmg: Math.round(dmg),
+        opts: { who: "me", weapon: { label: `${w.label}飛殺`, short: "飛殺" }, stun: 0 },
+        t: 0.1,
+      });
+    } else {
+      this.emitEvent("miss", { who: "me" });
+      this.message = "飛殺撲空——抓準距離再突進!";
+    }
+    this.pushHud();
   }
 
   // 放開出手:蓄滿=大招(刀光/劍光/波動),沒蓄滿=普通攻擊
@@ -1264,6 +1380,7 @@ export class JoustingGame {
       rider.strikeT += sdt;
       rider.cd = Math.max(0, rider.cd - sdt);
       if (rider.koT >= 0) rider.koT += delta;
+      rider.techCd = Math.max(0, rider.techCd - sdt);
       if (rider.chargeT >= 0 && this.phase === "battle" && !paused) {
         rider.chargeT = Math.min(CHARGE_FULL, rider.chargeT + sdt);
       }
@@ -1291,7 +1408,30 @@ export class JoustingGame {
       return;
     }
     const preset = DIFFICULTY_PRESETS[this.difficulty];
+    // 跳殺進行中:拋物線躍撲(暫時鎖控制)
+    if (rider.leap) {
+      rider.leap.t += dt;
+      const k = clamp(rider.leap.t / rider.leap.dur, 0, 1);
+      rider.pos.lerpVectors(rider.leap.from, rider.leap.to, k);
+      rider.airY = rider.leap.h * 4 * k * (1 - k);
+      rider.gallopT += dt * 1.4;
+      if (k >= 1) this._landLeap(rider);
+      return;
+    }
+    // 飛殺進行中:比衝刺更快的爆發直衝,碰到就斬
+    if (rider.dash) {
+      rider.dash.t += dt;
+      rider.speed = rider.dash.speed;
+      this.movePos(rider, dt);
+      rider.gallopT += dt * (rider.speed / 8);
+      const d = rider.pos.distanceTo(this.foe.pos);
+      if (d <= 2.4 || rider.dash.t >= rider.dash.dur) this._landDash(rider, d);
+      return;
+    }
     const stunned = rider.stunT < this._stunDur();
+    // 衝刺累計(突進技的啟動條件)
+    const sprinting = this.input.isDown("up") && this.input.isDown("sprint") && !stunned;
+    rider.sprintT = sprinting && Math.abs(rider.speed) > preset.maxFwd * 0.8 ? rider.sprintT + dt : 0;
     let target = 0;
     if (!stunned) {
       if (this.input.isDown("up")) target = preset.maxFwd + (this.input.isDown("sprint") ? preset.boost : 0);
@@ -1331,8 +1471,9 @@ export class JoustingGame {
     rider.pos.z = nz;
   }
 
-  // 兩馬不重疊(輕推開,防穿模)
+  // 兩馬不重疊(輕推開,防穿模;跳殺空中不推)
   resolveBodyPush() {
+    if (this.my.leap) return;
     const dx = this.foe.pos.x - this.my.pos.x;
     const dz = this.foe.pos.z - this.my.pos.z;
     const d = Math.hypot(dx, dz);
