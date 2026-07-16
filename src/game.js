@@ -1040,6 +1040,42 @@ export class JoustingGame {
   }
 
   // ---------- 突進技:跳殺(躍撲落地斬)/飛殺(爆發突進斬) ----------
+  // 快速鍵直發(07-16 使用者點名:E=跳殺、R=飛殺,不用先衝刺);距離不對給提示
+  _tryTech(kind) {
+    if (this.overlay.visible || this.phase !== "battle" || this.endT >= 0) return;
+    const r = this.my;
+    if (r.koT >= 0 || r.leap || r.dash || r.blocking || r.stunT < this._stunDur()) return;
+    if (this.foe.koT >= 0) return;
+    if (r.techCd > 0) {
+      this.message = `突進技冷卻中…(${r.techCd.toFixed(1)}s)`;
+      this.pushHud();
+      return;
+    }
+    const dist = r.pos.distanceTo(this.foe.pos);
+    if (kind === "leap") {
+      if (dist < DASH_RANGE[0]) {
+        this.message = "太近了——跳殺要拉開一點距離!";
+        this.pushHud();
+        return;
+      }
+      if (dist > LEAP_RANGE[1]) {
+        this.message = "太遠了——跳殺搆不到,先衝近一點!";
+        this.pushHud();
+        return;
+      }
+      r.chargeT = -1;
+      this._startLeap(r);
+    } else {
+      if (dist > DASH_RANGE[1] + 4) {
+        this.message = "太遠了——飛殺要再靠近一點!";
+        this.pushHud();
+        return;
+      }
+      r.chargeT = -1;
+      this._startDash(r);
+    }
+  }
+
   _startLeap(rider) {
     const target = this.foe;
     const dist = rider.pos.distanceTo(target.pos);
@@ -1851,6 +1887,8 @@ export class JoustingGame {
     if (this.input.consumeRelease("shoot")) this._shootRelease(); // 放開一定要收到(即使暫停)
     if (this.overlay.visible) return;
     if (this.input.consumePress("shoot")) this._shootPress();
+    if (this.input.consumePress("leap")) this._tryTech("leap"); // E=跳殺
+    if (this.input.consumePress("dashkill")) this._tryTech("dash"); // R=飛殺
     if (this.input.consumePress("switch")) this.cyclePlayerWeapon();
     for (let i = 0; i < WEAPON_ORDER.length; i += 1) {
       if (this.input.consumePress(`weapon${i + 1}`)) this.setPlayerWeapon(WEAPON_ORDER[i]);
@@ -1885,7 +1923,8 @@ export class JoustingGame {
       const model = rider.gear.weapons[rider.weaponId];
       let armX = engaged ? -1.35 : -1.05; // 備戰持械位
       let armJ = engaged ? -0.15 : -0.6;
-      let rigY = 0; // 上身水平旋轉(迴旋斬用)
+      let armY = 0; // 持刀臂水平掃角(360° 橫掃用)
+      let rigY = 0; // 上身水平旋轉(微跟用)
       let strikeLean = 0; // 上身前壓(力道感)
       let weaponZ = 0.1;
       if (w.ranged) {
@@ -1909,17 +1948,21 @@ export class JoustingGame {
             strikeLean = 0.3 * (1 - k);
           }
         } else if (w.swing === "spin") {
-          armX = -1.5; // 手臂平舉,大刀橫置
+          // 360° 水平橫掃(07-16 修:不再整個上身自轉)——刀臂先下壓 90° 放平,
+          // 再「只有持刀手臂」繞垂直軸在水平面掃一整圈,上身只微跟(重量感)
+          armX = -1.5; // 手臂下壓 90°,大刀放平
           armJ = 0;
           if (st < 0.12) { // 起手反擰
-            rigY = -(st / 0.12) * 0.5;
-          } else if (st < 0.45) { // 上身整圈 360° 迴旋橫掃
-            rigY = -0.5 - ((st - 0.12) / 0.33) * Math.PI * 2;
-            strikeLean = 0.15;
-          } else { // 收勢(−0.5−2π 與 −0.5 同向,直接從 −0.5 轉回 0)
+            armY = (st / 0.12) * 0.5;
+            strikeLean = 0.08;
+          } else if (st < 0.45) { // 手臂水平掃 360°
+            armY = 0.5 - ((st - 0.12) / 0.33) * Math.PI * 2;
+            strikeLean = 0.18;
+          } else { // 收勢(0.5−2π 與 0.5 同向,直接從 0.5 收回 0)
             const k = (st - 0.45) / 0.15;
-            rigY = -0.5 * (1 - k);
+            armY = 0.5 * (1 - k);
           }
+          rigY = armY * 0.15; // 上身微跟,不自轉
         } else { // lunge:回拉蓄力 → 整枝大幅前刺 → 收回
           if (st < 0.1) {
             const k = st / 0.1;
@@ -1956,7 +1999,9 @@ export class JoustingGame {
       } else {
         rider.chargeRing.material.opacity = 0;
       }
+      person.rightArm.pivot.rotation.order = "YXZ"; // 先水平掃角再抬臂角(橫掃要用)
       person.rightArm.pivot.rotation.x = armX;
+      person.rightArm.pivot.rotation.y = armY;
       person.rightArm.joint.rotation.x = armJ;
       person.rig.rotation.y = rigY;
       if (model) model.position.z = weaponZ;
