@@ -19,8 +19,8 @@
 
       <div class="top-bar">
         <div class="score-card team-home">
-          <span class="score-label">紅騎士(我)</span>
-          <strong id="myScoreLabel">0</strong>
+          <span class="score-label">紅騎士(我)血量</span>
+          <strong id="myScoreLabel">100</strong>
         </div>
         <div class="center-board">
           <div class="clock-stack period-stack">
@@ -29,18 +29,18 @@
           </div>
           <div class="clock-stack">
             <span class="mini-label">回合</span>
-            <strong id="passLabel">1/5</strong>
+            <strong id="passLabel">0</strong>
             <span class="stack-subtext" id="gapLabel">—</span>
           </div>
           <div class="clock-stack accent">
-            <span class="mini-label">上一回合</span>
+            <span class="mini-label">上一擊</span>
             <strong id="lastPassLabel">—</strong>
             <span class="stack-subtext" id="phaseLabel">主選單</span>
           </div>
         </div>
         <div class="score-card team-away">
-          <span class="score-label">藍騎士(AI)</span>
-          <strong id="aiScoreLabel">0</strong>
+          <span class="score-label">藍騎士(AI)血量</span>
+          <strong id="aiScoreLabel">100</strong>
         </div>
       </div>
 
@@ -54,7 +54,7 @@
           <p class="eyebrow">Jousting 3D · 德義武鬥館</p>
           <h1>3D 騎士比武</h1>
           <p class="panel-copy">
-            中世紀錦標賽對衝——綠區時機出槍擊盾:正中盾心 2 分、擦中 1 分。點到為止,無 KO,騎士精神!
+            開放競技場自由馬戰——馬可前進、後退、轉向,八般武器隨時更換,打光對手血量條獲勝!鈍頭武器無流血,敗方溫柔落馬,騎士精神!
           </p>
         </div>
 
@@ -70,6 +70,10 @@
           <div>
             <span class="mini-label">與對手距離</span>
             <strong id="gapSideLabel">—</strong>
+          </div>
+          <div>
+            <span class="mini-label">目前武器</span>
+            <strong id="weaponSideLabel">騎士長槍</strong>
           </div>
           <div>
             <span class="mini-label">馬速</span>
@@ -95,7 +99,7 @@
           </div>
 
           <div class="meter-copy stamina-copy">
-            <span class="mini-label">出槍時機(滿=理想出槍點)</span>
+            <span class="mini-label">武器冷卻(滿=可出手)</span>
             <strong id="windowValue">—</strong>
           </div>
           <div class="meter-track stamina">
@@ -119,20 +123,24 @@
 
         <div class="panel-block instructions">
           <p class="mini-label">操作</p>
-          <p>衝鋒 / 出槍: 點畫面或空白鍵</p>
-          <p>加速: 按住 W / ↑ / 加速鈕</p>
-          <p>收步: 按住 S / ↓</p>
-          <p>視角切換: V｜暫停: Esc / P</p>
+          <p>出手: 點畫面或空白鍵</p>
+          <p>前進 / 後退: W / S(↑ / ↓)</p>
+          <p>左轉 / 右轉: A / D(← / →)</p>
+          <p>換武器: 1-8 直選,Q / Tab 循環</p>
+          <p>衝刺: Shift｜視角: V｜暫停: Esc / P</p>
         </div>
       </aside>
 
       <div class="touch-layer" id="touchControls">
         <div class="dpad">
-          <button data-action="up" aria-label="加速">▲ 加速</button>
-          <button data-action="down" aria-label="收步">▼ 收步</button>
+          <button data-action="up" aria-label="前進">▲</button>
+          <button data-action="left" aria-label="左轉">◀</button>
+          <button data-action="right" aria-label="右轉">▶</button>
+          <button data-action="down" aria-label="後退">▼</button>
         </div>
         <div class="action-pad">
-          <button data-action="shoot" class="shoot">出槍</button>
+          <button data-action="shoot" class="shoot">出手</button>
+          <button data-action="switch">換武器</button>
           <button data-action="camera">視角</button>
         </div>
       </div>
@@ -154,9 +162,9 @@
         <div class="home-content">
           <div class="home-hero">
             <p class="eyebrow">Jousting 3D · 德義武鬥館</p>
-            <h2>號角、衝鋒、出槍!</h2>
+            <h2>自由馬戰,八般武器!</h2>
             <p>
-              兩騎沿分隔柵對衝——按住「加速」全速衝鋒(時機更難抓!),對手接近、時機條進綠區的瞬間點「出槍」擊盾。點到為止無 KO:被擊中只會後仰晃一下,比的是準頭與膽識!
+              開放競技場自由走位——馬可前進、後退、原地轉向,中間沒有任何圍欄!長槍、長矛、大刀、劍、彎刀、西洋劍、弓箭、雙綠鋼球隨時切換,看準冷卻與距離出手,打光對手血量條獲勝。鈍頭武器無流血、敗方溫柔落馬——騎士精神!
             </p>
           </div>
 
@@ -166,15 +174,15 @@
               <div class="mode-card-grid" id="modeCardGrid">
                 <button class="mode-card" data-mode="duel">
                   <strong>對決</strong>
-                  <span>五回合(職業七回合),總分高者勝</span>
+                  <span>各 100 血,打光對手血量獲勝</span>
                 </button>
-                <button class="mode-card" data-mode="race7">
-                  <strong>搶七</strong>
-                  <span>不限回合,先到 7 分獲勝</span>
+                <button class="mode-card" data-mode="epic">
+                  <strong>大戰三百回合</strong>
+                  <span>各 300 血馬拉松,戰滿三百回合以血量判定</span>
                 </button>
                 <button class="mode-card" data-mode="practice">
                   <strong>練習場</strong>
-                  <span>無限回合,對手不計分</span>
+                  <span>對手只走位不出手,自由練武器手感</span>
                 </button>
               </div>
               <p id="modeDescription" class="mode-description"></p>
@@ -189,6 +197,18 @@
                 <option value="easy">入門</option>
                 <option value="normal">標準</option>
                 <option value="hard">職業</option>
+              </select>
+
+              <label class="field-label" for="weaponSelect">起手武器(戰鬥中可用 1-8 / Q 隨時更換)</label>
+              <select id="weaponSelect">
+                <option value="lance">騎士長槍——衝鋒加成最大,慢而重</option>
+                <option value="spear">長矛——長距直刺,攻守兼備</option>
+                <option value="greatblade">青龍大刀——橫掃大弧,重擊</option>
+                <option value="sword">騎士劍——均衡好上手</option>
+                <option value="saber">彎刀——出手飛快的連擊</option>
+                <option value="rapier">西洋劍——最快的點刺</option>
+                <option value="bow">弓箭——遠距狙擊(鈍頭箭)</option>
+                <option value="greenballs">雙綠鋼球——兩顆連投,命中暈眩</option>
               </select>
 
               <label class="field-label" for="horseCoatSelect">戰馬毛色</label>
@@ -229,7 +249,7 @@
       </div>
     </div>
 
-      <div class="power-panel-big" id="bigPower" hidden><span>出槍時機</span><div class="big-track"><div class="big-fill" id="bigPowerFill"></div></div></div>
+      <div class="power-panel-big" id="bigPower" hidden><span id="bigPowerLabel">出手時機</span><div class="big-track"><div class="big-fill" id="bigPowerFill"></div></div></div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

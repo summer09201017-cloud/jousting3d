@@ -43,6 +43,9 @@ const ui = {
   modeDescription: document.querySelector("#modeDescription"),
   menuDifficultySelect: document.querySelector("#menuDifficultySelect"),
   horseCoatSelect: document.querySelector("#horseCoatSelect"),
+  weaponSelect: document.querySelector("#weaponSelect"),
+  weaponSideLabel: document.querySelector("#weaponSideLabel"),
+  bigPowerLabel: document.querySelector("#bigPowerLabel"),
   audioSelect: document.querySelector("#audioSelect"),
   modeMetaTitle: document.querySelector("#modeMetaTitle"),
   modeMetaGoal: document.querySelector("#modeMetaGoal"),
@@ -65,6 +68,7 @@ window.__game = game; // /smoke3d 通用鉤子
 let selectedModeId = game.modeId;
 let selectedDifficulty = game.difficulty;
 let selectedCoat = game.coatId;
+let selectedWeapon = game.weaponId;
 let audioEnabled = settings.audioEnabled !== false;
 
 function persistSettings() {
@@ -72,6 +76,7 @@ function persistSettings() {
     difficulty: selectedDifficulty,
     modeId: selectedModeId,
     horseCoat: selectedCoat,
+    weaponId: selectedWeapon,
     audioEnabled,
   });
 }
@@ -103,6 +108,7 @@ function syncMenuCards() {
 function syncMenuControls() {
   ui.menuDifficultySelect.value = selectedDifficulty;
   ui.horseCoatSelect.value = selectedCoat;
+  ui.weaponSelect.value = selectedWeapon;
   syncMenuCards();
 }
 
@@ -110,6 +116,7 @@ function syncGameConfigurationToMenu() {
   selectedModeId = game.modeId;
   selectedDifficulty = game.difficulty;
   selectedCoat = game.coatId;
+  selectedWeapon = game.weaponId;
   syncMenuControls();
 }
 
@@ -154,48 +161,66 @@ function handleGameEvent(event) {
       audio.whistle();
       audio.startCrowd();
       audio.vibrate(18);
-      pushCommentary("歡迎來到騎士錦標賽!點到為止,騎士精神!");
+      pushCommentary("歡迎來到騎士大混戰!八般武器,點到為止!");
       break;
     }
-    case "charge": {
+    case "battle-start": {
       audio.horn();
       audio.vibrate(16);
-      pushCommentary(`第 ${event.pass} 回合——衝鋒!`, "info", "號角響起,衝鋒!盯住時機條!");
+      pushCommentary("開戰!", "hot", "號角響起,開戰!自由走位,看準時機出手!");
       break;
     }
-    case "strike": {
+    case "shoot": {
       audio.swish();
-      audio.vibrate(14);
+      if (event.who === "me") audio.vibrate(12);
       break;
     }
-    case "strike-early": {
-      audio.rebound();
-      pushCommentary("太早出槍了——等時機條進綠區!", "cool", "太早出槍了,穩住再出!");
-      break;
-    }
-    case "pass-result": {
-      if (event.myPts > 0) {
-        audio.scoreSting();
-        audio.crowdCheer(event.myPts === 2 ? 0.9 : 0.5);
-        audio.vibrate([30, 20, 45]);
-      } else {
-        audio.thud(0.5);
+    case "miss": {
+      if (event.who === "me") {
+        audio.rebound();
+        pushCommentary("這一下落空了——靠近、對準再出手!", "cool", "可惜,這一下落空了。");
       }
-      if (event.aiPts > 0) audio.thud(0.8);
-      const mySay = event.myPts === 2 ? "正中盾心!漂亮的一槍!" : event.myPts === 1 ? "擦中盾牌,拿下一分!" : "可惜,這槍落空了。";
-      pushCommentary(
-        `${event.mineText}｜${event.theirsText}(${event.myScore}:${event.aiScore})`,
-        event.myPts === 2 ? "hot" : event.myPts === 0 ? "cool" : "info",
-        mySay,
-      );
+      break;
+    }
+    case "weapon-switch": {
+      audio.uiTap();
+      if (event.who === "me") {
+        pushCommentary(`換上${event.label}!`, "info", "換上新武器,打法一變!");
+      } else {
+        pushCommentary(`對手換上${event.label}——注意距離!`, "cool", "對手換武器了,注意距離!");
+      }
+      break;
+    }
+    case "hit": {
+      if (event.who === "me") {
+        audio.scoreSting();
+        audio.crowdCheer(event.dmg >= 14 ? 0.9 : 0.5);
+        audio.vibrate([30, 20, 45]);
+        pushCommentary(
+          `${event.weapon}命中!對手 -${event.dmg}${event.stun ? "(暈眩!)" : ""}(第 ${event.round} 回合)`,
+          "hot",
+          event.stun ? "鋼球命中,對手暈頭轉向!" : event.dmg >= 14 ? "正中要害,重重的一擊!" : "漂亮的一擊!",
+        );
+      } else {
+        audio.thud(0.8);
+        audio.vibrate(24);
+        pushCommentary(
+          `被${event.weapon}擊中 -${event.dmg}——拉開距離再反擊!`,
+          "cool",
+          "對手命中,小心走位!",
+        );
+      }
+      break;
+    }
+    case "ko": {
+      audio.horn();
+      audio.crowdCheer(event.winner === "me" ? 1 : 0.6);
+      audio.vibrate([110, 50, 120]);
       break;
     }
     case "match-end": {
-      audio.horn();
-      audio.crowdCheer(event.win ? 1 : 0.5);
-      audio.vibrate([110, 50, 120]);
       pushCommentary(
-        `終場 ${event.myScore}:${event.aiScore}!`,
+        `終場!大戰 ${event.rounds} 回合,血量 ${event.myHp}:${event.aiHp}`,
         event.win ? "hot" : "info",
         event.win ? "紅騎士獲勝!全場歡呼!" : event.draw ? "平分秋色,再戰一場!" : "這場對手技高一籌,再來!",
       );
@@ -210,30 +235,32 @@ function handleGameEvent(event) {
 game.onEvent = handleGameEvent;
 
 game.onHudUpdate = (state) => {
-  ui.myScoreLabel.textContent = String(state.myScore);
-  ui.aiScoreLabel.textContent = String(state.aiScore);
-  ui.modeCode.textContent = ({ 對決: "對決", 搶七: "搶七", 練習場: "練習" })[state.modeLabel] || state.modeLabel;
-  ui.passLabel.textContent = `${state.passNo}/${state.totalPasses}`;
+  ui.myScoreLabel.textContent = String(state.myHp);
+  ui.aiScoreLabel.textContent = String(state.aiHp);
+  ui.modeCode.textContent = ({ 對決: "對決", 大戰三百回合: "三百回合", 練習場: "練習" })[state.modeLabel] || state.modeLabel;
+  ui.passLabel.textContent = state.roundCap ? `${state.roundNo}/${state.roundCap}` : String(state.roundNo);
   ui.gapLabel.textContent = state.gapText;
   ui.gapSideLabel.textContent = state.gapText;
-  ui.lastPassLabel.textContent = state.lastResult
-    ? (state.lastResult.myPts === 2 ? "正中!" : state.lastResult.myPts === 1 ? "擦中" : "落空")
+  ui.lastPassLabel.textContent = state.lastHit
+    ? (state.lastHit.who === "me" ? `${state.lastHit.weapon} -${state.lastHit.dmg}` : `挨${state.lastHit.weapon} -${state.lastHit.dmg}`)
     : "—";
   ui.phaseLabel.textContent = state.phaseLabel;
   ui.statusMessage.textContent = state.message;
   ui.modeLabel.textContent = state.modeLabel;
   ui.difficultyLabel.textContent = state.difficultyLabel;
+  ui.weaponSideLabel.textContent = state.weaponLabel;
   ui.speedLabel.textContent = state.speedText;
   ui.speedMeterText.textContent = state.speedText;
   setMeterFill(ui.speedMeterFill, state.speed01);
-  ui.windowValue.textContent = state.armed ? "已出槍" : state.approach01 > 0 ? (state.inWindow ? "綠區!出槍!" : "接近中…") : "—";
-  setMeterFill(ui.windowFill, state.approach01);
-  { // 中下方大時機條:對手接近時顯示,綠區=full 發光
+  ui.windowValue.textContent = state.weaponReady ? (state.inReach ? "可出手!" : "冷卻好了,靠近!") : "冷卻中…";
+  setMeterFill(ui.windowFill, state.weaponReady01);
+  { // 中下方大出手條:戰鬥中顯示;滿+夠近=發光
     const bp = document.getElementById("bigPower"), bf = document.getElementById("bigPowerFill");
     if (bp) {
-      bp.hidden = !(state.approach01 > 0 && !state.armed);
-      bf.style.transform = `scaleX(${Math.min(1, state.approach01)})`;
-      bf.classList.toggle("full", state.inWindow);
+      bp.hidden = state.phaseLabel !== "激戰中";
+      if (ui.bigPowerLabel) ui.bigPowerLabel.textContent = `${state.weaponShort}出手`;
+      bf.style.transform = `scaleX(${Math.min(1, state.weaponReady01)})`;
+      bf.classList.toggle("full", state.weaponReady && state.inReach);
     }
   }
   syncOverlay(state.overlay);
@@ -266,6 +293,14 @@ ui.horseCoatSelect.addEventListener("change", (event) => {
   persistSettings();
 });
 
+ui.weaponSelect.addEventListener("change", (event) => {
+  unlockAudio();
+  audio.uiTap();
+  selectedWeapon = event.target.value;
+  game.setPlayerWeapon(selectedWeapon, false);
+  persistSettings();
+});
+
 ui.audioSelect.addEventListener("change", (event) => {
   unlockAudio();
   audio.uiTap();
@@ -279,6 +314,7 @@ ui.startMatchButton.addEventListener("click", () => {
     difficulty: selectedDifficulty,
     modeId: selectedModeId,
     horseCoat: selectedCoat,
+    weaponId: selectedWeapon,
   });
   game.startSelectedMatch();
   closeHomeScreen();

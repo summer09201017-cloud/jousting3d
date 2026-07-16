@@ -1,15 +1,24 @@
-# CLAUDE.md — jousting3d(3D 騎士比武=騎乘引擎對衝變體,德義武鬥館)
+# CLAUDE.md — jousting3d(3D 騎士比武=自由騎控馬戰,德義武鬥館)
 
-> 2026-07-15。GitHub 唯一真相;帳號 summer09201017-cloud。base=equestrian3d 馬體+直線對衝道。
+> 2026-07-16 大改版(使用者拍板):對衝計分制 → 自由走位血量制武鬥。GitHub 唯一真相;
+> 帳號 summer09201017-cloud。base=equestrian3d 馬體。
 
-## 引擎要點
+## 引擎要點(07-16 版)
 
-- 直線對衝(無樣條):myZ/aiZ 相向推進;`strike()` 判定=畫面:
-  `err=|gap-STRIKE_IDEAL|/closing`、`q=1-err/(window*2.2)`;≥0.85=正中2分、≥0.45=擦中1分。
-- 無 KO 鐵則:hitReactT 後仰演出+盾閃 hitFlash,不落馬;AI 得分=aiSkill±0.28 隨機。
-- knightUp():全罩盔+羽飾+胸甲+隊色盾(白十字)+鈍頭槍(垂直儀仗→couch 放平→出槍前刺)。
-- 馬=長腿 v3+鬃毛三件套;caparison 隊色馬衣。
-- reset 階段滑行 1.8s → 下一回合 beginPass(鏡頭硬切防穿場)。
+- 自由騎控:rider={pos,heading,speed};W/S 前進後退(倒退 MAX_BACK=2.6)、A/D 轉向
+  (turnRate 依難度);開放競技場 ARENA_HALF=25,無中央分隔柵,邊界柔性擋(速度×0.5)。
+- 血量制:對決各 100 血/大戰三百回合各 300 血(roundCap=300 戰滿以血量判定)/練習場 AI 不出手。
+  「回合」=雙方出手總次數。KO=溫柔落馬演出(koT 側滑 1.2s,無流血)→ endT 1.6s 結算。
+- 八般武器 WEAPONS 資料驅動(reach/dmg/cd/arc;弓箭+雙綠鋼球 ranged 有 projSpeed/maxRange,
+  鋼球 volley=2+stun 1.1s):長槍(chargeBonus 0.9 衝鋒加成)/長矛/青龍大刀/騎士劍/彎刀/西洋劍/
+  弓箭/雙綠鋼球。1-8 直選、Q/Tab 循環、戰鬥中換=0.35s 硬直;模型全掛右手 visible 切換。
+- 判定=畫面(鐵則4):近戰=距離(reach+BODY_REACH)+朝向(arc)幾何判定;AI 另過 aiSkill+0.18
+  命中門檻(擬人失手)。投射物 projectiles 陣列,玩家自動輔瞄+預判,AI 依 aiSkill 加誤差。
+- AI 三腦(npc-ai-kit):走位(近戰追擊/遠程保持 8-16m 繞圈/35% 得手後退開)+換武器
+  (switchT 6-11s,依距離挑近戰或遠程)+出手;快撞牆自動轉向場中央。
+- 命中=hitFlash 盾閃(鋼球=綠閃)+慢動作 0.4x+側面特寫 hitCamT;被擊=後仰苦臉;暈眩=搖晃。
+- knightUp():全罩盔+羽飾+胸甲+隊色盾(白十字)+八般武器模型庫。
+- 馬=長腿 v3+鬃毛三件套;caparison 隊色馬衣;resolveBodyPush 兩馬防穿模(<1.7m 推開)。
 
 ## 部署與同步
 

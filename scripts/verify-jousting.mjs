@@ -1,4 +1,7 @@
-// jousting3d 端到端驗證:完美騎士(綠區出槍)→ 高分勝;全程不出槍 → 低分;搶七模式
+// jousting3d 端到端驗證(07-16 自由馬戰版):
+// ①kids 對決:自走 bot(追擊+出手)→ 應 KO 對手獲勝
+// ②normal 被動局:玩家站著不動 → AI 應能追上並 KO 玩家(證明 AI 會走位會打)
+// ③八般武器掃一輪:每把都出手,遠程要有投射物,全程 0 pageerror
 // 用法:node scripts/verify-jousting.mjs <url> <outDir>
 import { chromium } from "playwright";
 
@@ -18,53 +21,105 @@ await page.waitForTimeout(1200);
 
 const G = "__jousting3d";
 
-const runMatch = (mode, fighter) => page.evaluate(async ([g, m, fight]) => {
+const startMatch = (mode, difficulty, weapon) => page.evaluate(([g, m, d, w]) => {
   const game = window[g];
-  document.querySelector(`.mode-card[data-mode="${m}"]`).click();
-  document.querySelector("#startMatchButton").click();
-  await new Promise((r) => setTimeout(r, 250));
-  const t0 = performance.now();
-  while (game.phase !== "ended" && performance.now() - t0 < 180000) {
-    if (game.phase === "gate") game.strike(); // 衝鋒
-    else if (fight && game.phase === "charging" && !game.armed) {
-      const gap = game.aiZ - game.myZ;
-      const closing = Math.max(game.speed + game.aiSpeed, 1);
-      if (gap <= 26 && Math.abs(gap - 2.4) / closing <= 0.05) game.strike();
-    }
-    await new Promise((r) => setTimeout(r, 16));
-  }
-  return { phase: game.phase, my: game.myScore, ai: game.aiScore, passes: game.passNo, overlay: { ...game.overlay } };
-}, [G, mode, fighter]);
+  game.applyPresentation({ difficulty: d, modeId: m, weaponId: w });
+  game.startSelectedMatch();
+  document.querySelector("#homeScreen").classList.remove("visible");
+  game.strike(); // gate → battle
+}, [G, mode, difficulty, weapon]);
 
-await page.waitForTimeout(600);
+const backToMenu = async () => {
+  await page.evaluate(() => document.querySelector("#overlayMenuButton").click());
+  await page.evaluate(() => document.querySelector("#homeScreen").classList.remove("visible"));
+  await page.waitForTimeout(300);
+};
+
+// —— ① kids 對決:自走 bot 追擊出手 ——
 await page.screenshot({ path: outDir + "/jo-menu.png" });
-
-// —— 對決:完美騎士 ——
-results.duelFight = await runMatch("duel", true);
+await startMatch("duel", "kids", "sword");
+results.botDuel = await page.evaluate(async ([g]) => {
+  const game = window[g];
+  const t0 = performance.now();
+  let midShot = false;
+  while (game.phase !== "ended" && performance.now() - t0 < 120000) {
+    const dx = game.foe.pos.x - game.my.pos.x;
+    const dz = game.foe.pos.z - game.my.pos.z;
+    const dist = Math.hypot(dx, dz);
+    game.my.heading = Math.atan2(dx, dz); // bot 直接對準(測試走位交給 AI 局)
+    game.input.held.add("up");
+    if (dist < 3.0) {
+      game.input.held.delete("up");
+      game.strike();
+    }
+    await new Promise((r) => setTimeout(r, 32));
+  }
+  game.input.held.delete("up");
+  return { phase: game.phase, myHp: game.my.hp, aiHp: game.foe.hp, rounds: game.roundNo, overlay: { ...game.overlay } };
+}, [G]);
 await page.screenshot({ path: outDir + "/jo-finish.png" });
 
-// —— 對決:全程不出槍 ——
-await page.evaluate(() => document.querySelector("#overlayMenuButton").click());
-await page.waitForTimeout(400);
-results.duelPassive = await runMatch("duel", false);
+// —— ② normal 被動局:玩家不動,AI 要能自己打贏 ——
+await backToMenu();
+await startMatch("duel", "normal", "lance");
+results.aiActive = await page.evaluate(async ([g]) => {
+  const game = window[g];
+  const t0 = performance.now();
+  while (game.phase !== "ended" && performance.now() - t0 < 240000) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  return { phase: game.phase, myHp: game.my.hp, aiHp: game.foe.hp, rounds: game.roundNo };
+}, [G]);
 
-// —— 搶七 ——
-await page.evaluate(() => document.querySelector("#overlayMenuButton").click());
-await page.waitForTimeout(400);
-results.race7 = await runMatch("race7", true);
+// —— ③ 八般武器掃一輪(練習場:AI 不還手,專心驗武器) ——
+await backToMenu();
+await startMatch("practice", "normal", "lance");
+results.weapons = await page.evaluate(async ([g]) => {
+  const game = window[g];
+  const order = ["lance", "spear", "greatblade", "sword", "saber", "rapier", "bow", "greenballs"];
+  const out = {};
+  let sawProjectile = false;
+  for (const id of order) {
+    game.setPlayerWeapon(id);
+    // 等冷卻歸零(換武器硬直+上一把殘留冷卻)
+    const w0 = performance.now();
+    while (game.my.cd > 0 && performance.now() - w0 < 4000) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    // 對準對手出手(近戰可能太遠=落空,重點是不噴錯;遠程要生成投射物)
+    const dx = game.foe.pos.x - game.my.pos.x;
+    const dz = game.foe.pos.z - game.my.pos.z;
+    game.my.heading = Math.atan2(dx, dz);
+    const before = game.roundNo;
+    game.strike();
+    // 投射物命中即消失,出手後立刻高頻抽查
+    for (let i = 0; i < 12; i += 1) {
+      await new Promise((r) => setTimeout(r, 40));
+      if (game.projectiles.length > 0) sawProjectile = true;
+    }
+    out[id] = { attacked: game.roundNo > before, weaponVisible: game.my.gear.weapons[id].visible };
+  }
+  return { perWeapon: out, sawProjectile, roundNo: game.roundNo };
+}, [G]);
+await page.screenshot({ path: outDir + "/jo-weapons.png" });
 
-// —— 衝鋒中截圖(兩騎對衝+分隔柵+時機條) ——
-await page.evaluate(() => document.querySelector("#overlayMenuButton").click());
-await page.waitForTimeout(400);
-await page.evaluate((g) => {
-  document.querySelector('.mode-card[data-mode="duel"]').click();
-  document.querySelector("#startMatchButton").click();
-  setTimeout(() => window[g].strike(), 250);
-}, G);
-await page.waitForTimeout(2600);
-await page.screenshot({ path: outDir + "/jo-charging.png" });
-await page.waitForTimeout(1100); // 接近交錯
-await page.screenshot({ path: outDir + "/jo-close.png" });
+// —— 戰鬥中景截圖(自由走位+開放場地無分隔柵) ——
+await backToMenu();
+await startMatch("duel", "normal", "greatblade");
+await page.evaluate(async ([g]) => {
+  const game = window[g];
+  const t0 = performance.now();
+  while (performance.now() - t0 < 3500) {
+    const dx = game.foe.pos.x - game.my.pos.x;
+    const dz = game.foe.pos.z - game.my.pos.z;
+    game.my.heading = Math.atan2(dx, dz);
+    game.input.held.add("up");
+    if (Math.hypot(dx, dz) < 3.2) game.strike();
+    await new Promise((r) => setTimeout(r, 32));
+  }
+  game.input.held.delete("up");
+}, [G]);
+await page.screenshot({ path: outDir + "/jo-battle.png" });
 
 console.log(JSON.stringify({ results, errors }, null, 2));
 await browser.close();

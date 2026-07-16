@@ -2,20 +2,22 @@ import * as THREE from "three";
 import { InputManager } from "./input.js";
 import { loadSettings, saveSettings, loadSavedGame, saveGameState } from "./storage.js";
 
-// —— 3D 騎士比武(jousting3d,德義武鬥館)——騎乘引擎的「對衝時機」變體(2026-07-15 拍板)。
-// 中世紀錦標賽運動化包裝:兩騎沿分隔柵對衝,綠區時機出槍「擊盾」得分——
-// ★點到為止無 KO(拳擊館同款原則):被擊中=盾牌閃光+後仰苦臉,不落馬、不受傷、no blood。
-// 玩法:①按住加速控衝鋒速度(全速=時機窗更窄,張力)②對手接近時綠區按「出槍」。
-// ★判定=畫面(鐵則4):按下當下用時機誤差算正中盾心(2分)/擦中(1分)/落空(0分),交錯瞬間才演擊中。
+// —— 3D 騎士比武(jousting3d,德義武鬥館)——2026-07-16 大改版:自由騎控馬戰(武鬥制)。
+// 使用者拍板:①兩騎自由走位——馬可前進/後退/原地轉向,不再只有單向對衝 ②拆掉中間分隔柵,
+// 開放式競技場 ③血量條制:互相攻擊直到一方血量用完(「與 AI 騎士大戰三百回合」)④八般武器
+// 可選+戰鬥中隨時更換:長槍/長矛/青龍大刀/騎士劍/彎刀/西洋劍/弓箭/雙綠鋼球。
+// ★兒童安全鐵則不變:鈍頭武器、無流血;被擊中=盾閃+後仰苦臉;敗方=溫柔落馬演出(不受傷)。
+// ★判定=畫面(鐵則4):出手當下用「距離+朝向」幾何判定,命中瞬間演出盾閃+慢動作。
 
 // ---------- 可調量值 ----------
-// window=出槍時機窗(秒);aiSkill=對手平均出槍品質;passes=回合數
+// maxFwd=馬最高前速;turnRate=轉向速率;aiSkill=AI 出手命中率;aiCd=AI 冷卻倍率;
+// aiDmg=AI 傷害倍率;aiSpd=AI 馬速倍率;assist=兒童輔助(加傷害+放寬命中幾何)
 export const DIFFICULTY_PRESETS = {
-  kids: { baseSpeed: 6.0, boost: 2.2, window: 0.34, aiSkill: 0.3, passes: 5, assist: 0.5 },
-  child: { baseSpeed: 7.0, boost: 2.8, window: 0.26, aiSkill: 0.42, passes: 5, assist: 0.3 },
-  easy: { baseSpeed: 8.0, boost: 3.4, window: 0.2, aiSkill: 0.55, passes: 5, assist: 0.15 },
-  normal: { baseSpeed: 9.0, boost: 4.0, window: 0.15, aiSkill: 0.68, passes: 5, assist: 0 },
-  hard: { baseSpeed: 10.0, boost: 4.8, window: 0.11, aiSkill: 0.8, passes: 7, assist: 0 },
+  kids: { maxFwd: 6.5, boost: 2.0, turnRate: 2.1, aiSkill: 0.25, aiCd: 1.9, aiDmg: 0.45, aiSpd: 0.75, assist: 0.5 },
+  child: { maxFwd: 7.5, boost: 2.6, turnRate: 2.05, aiSkill: 0.4, aiCd: 1.5, aiDmg: 0.65, aiSpd: 0.85, assist: 0.3 },
+  easy: { maxFwd: 8.5, boost: 3.2, turnRate: 1.95, aiSkill: 0.55, aiCd: 1.25, aiDmg: 0.8, aiSpd: 0.92, assist: 0.15 },
+  normal: { maxFwd: 9.5, boost: 4.0, turnRate: 1.85, aiSkill: 0.68, aiCd: 1.05, aiDmg: 0.95, aiSpd: 1.0, assist: 0 },
+  hard: { maxFwd: 10.5, boost: 4.6, turnRate: 1.8, aiSkill: 0.82, aiCd: 0.85, aiDmg: 1.1, aiSpd: 1.06, assist: 0 },
 };
 
 export const DIFFICULTY_LABELS = {
@@ -29,19 +31,22 @@ export const DIFFICULTY_LABELS = {
 export const GAME_MODES = {
   duel: {
     label: "對決",
-    description: "五回合對衝(職業七回合):正中盾心 2 分、擦中 1 分——總分高者勝!",
-    goal: "總分高者勝",
+    hp: 100,
+    description: "自由走位近身馬戰——用八般武器打光對手的血量條就獲勝!",
+    goal: "打光對手血量(各 100)",
   },
-  race7: {
-    label: "搶七",
-    race: 7,
-    description: "不限回合,先搶到 7 分的騎士獲勝——每一槍都是關鍵!",
-    goal: "先到 7 分",
+  epic: {
+    label: "大戰三百回合",
+    hp: 300,
+    roundCap: 300,
+    description: "雙方 300 血的馬拉松大戰!戰滿三百回合仍未分勝負,以剩餘血量判定。",
+    goal: "血量 300,戰到分出勝負",
   },
   practice: {
     label: "練習場",
-    endless: true,
-    description: "無限回合自由練——熟悉對衝節奏與綠區出槍手感(對手不計分)。",
+    hp: 100,
+    passive: true,
+    description: "對手只走位不出手——自由練馬上走位與八般武器手感。",
     goal: "純練手感,不計勝負",
   },
 };
@@ -50,12 +55,30 @@ export function getModeConfig(modeId) {
   return GAME_MODES[modeId] || GAME_MODES.duel;
 }
 
-// ---------- 對衝道常數 ----------
-const LANE_HALF = 42; // 起點離中線距離(m)
-const LANE_X = 1.05; // 兩騎各自離分隔柵的側距
-const STRIKE_IDEAL = 2.4; // 理想出槍點:與對手還差 2.4m(槍長)
-const ARM_RANGE = 26; // 進入「備戰」提示的距離(相對距離)
+// ---------- 八般武器(資料驅動;reach=出手距離、arc=正面判定角、cd=冷卻秒) ----------
+export const WEAPON_ORDER = ["lance", "spear", "greatblade", "sword", "saber", "rapier", "bow", "greenballs"];
+
+export const WEAPONS = {
+  lance: { label: "騎士長槍", short: "長槍", reach: 3.4, dmg: 16, cd: 1.6, arc: 0.55, chargeBonus: 0.9, hint: "衝鋒加成最大,慢而重" },
+  spear: { label: "長矛", short: "長矛", reach: 3.0, dmg: 12, cd: 1.1, arc: 0.65, chargeBonus: 0.5, hint: "長距直刺,攻守兼備" },
+  greatblade: { label: "青龍大刀", short: "大刀", reach: 2.5, dmg: 15, cd: 1.5, arc: 1.6, hint: "橫掃大弧,重擊" },
+  sword: { label: "騎士劍", short: "劍", reach: 2.0, dmg: 10, cd: 0.8, arc: 1.25, hint: "均衡好上手" },
+  saber: { label: "彎刀", short: "彎刀", reach: 1.9, dmg: 8, cd: 0.55, arc: 1.35, hint: "出手飛快的連擊" },
+  rapier: { label: "西洋劍", short: "西洋劍", reach: 2.2, dmg: 6, cd: 0.4, arc: 0.7, hint: "最快的點刺" },
+  bow: { label: "弓箭", short: "弓箭", ranged: true, dmg: 9, cd: 1.5, projSpeed: 30, maxRange: 45, hint: "遠距狙擊(鈍頭箭)" },
+  greenballs: { label: "雙綠鋼球", short: "鋼球", ranged: true, dmg: 6, cd: 2.4, projSpeed: 19, maxRange: 30, stun: 1.1, volley: 2, hint: "兩顆連投,命中讓對手暈一下" },
+};
+
+// ---------- 競技場常數 ----------
+const ARENA_HALF = 25; // 可騎乘範圍(±m)
+const BODY_REACH = 1.1; // 馬身+臂展的基礎出手距離
+const MAX_BACK = 2.6; // 馬倒退最高速
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+const wrapAngle = (a) => {
+  while (a > Math.PI) a -= Math.PI * 2;
+  while (a < -Math.PI) a += Math.PI * 2;
+  return a;
+};
 
 // ---------- 人物(系列 makePerson:臉部鐵則+關節人物) ----------
 function createLimb({ upperMaterial, lowerMaterial, endMaterial, upperLen, lowerLen, upperRadius, lowerRadius, end = "hand", thumbSide = 1 }) {
@@ -210,7 +233,7 @@ function makePerson({ shirt = 0x2f6f4e, pants = 0x2a3550, skin = 0xf3cca6, hair 
   return { group, rig, head, waist, leftArm, rightArm, leftLeg, rightLeg };
 }
 
-// ---------- 馬(長腿 v2+鬃毛三件套;coatMat/maneMat 可換色) ----------
+// ---------- 馬(長腿 v3+鬃毛三件套;coatMat/maneMat 可換色) ----------
 export const HORSE_COATS = {
   brown: { label: "棗棕", coat: 0x8a5a33, mane: 0x3a2a1c },
   white: { label: "白馬", coat: 0xe8e4da, mane: 0xcfc8b8 },
@@ -309,7 +332,7 @@ function makeHorse({ coat = 0x8a5a33, mane = 0x3a2a1c, caparison = null } = {}) 
       upperMaterial: coatMat,
       lowerMaterial: sock ? sockMat : coatMat,
       endMaterial: hoofMat,
-      upperLen: 0.62, lowerLen: 0.6, upperRadius: 0.085, lowerRadius: 0.062, // 長腿 v3(07-15 再點名) // 長腿 v2
+      upperLen: 0.62, lowerLen: 0.6, upperRadius: 0.085, lowerRadius: 0.062, // 長腿 v3
       end: "foot",
     });
     leg.pivot.position.set(x, 1.35, z);
@@ -330,10 +353,12 @@ function makeHorse({ coat = 0x8a5a33, mane = 0x3a2a1c, caparison = null } = {}) 
   return { group, rig, body, neckPivot, head, tail, legs, saddle, coatMat, maneMat };
 }
 
-// ---------- 騎士裝備:頭盔+羽飾、盾、比武槍(鈍頭 coronel) ----------
+// ---------- 騎士裝備:頭盔+羽飾+盾+八般武器(全部鈍頭/包棉演出,掛右手,切換顯示) ----------
 function knightUp(person, teamColor, plumeColor) {
   const teamMat = new THREE.MeshStandardMaterial({ color: teamColor, roughness: 0.6 });
   const steelMat = new THREE.MeshStandardMaterial({ color: 0xb9c0c8, metalness: 0.65, roughness: 0.35 });
+  const woodMat = new THREE.MeshStandardMaterial({ color: 0xd9c9a8, roughness: 0.7 });
+  const darkWoodMat = new THREE.MeshStandardMaterial({ color: 0x6d4a26, roughness: 0.7 });
   // 全罩盔(蓋住頭髮)+隊色羽飾
   const helm = new THREE.Mesh(new THREE.SphereGeometry(0.29, 16, 12), steelMat);
   helm.position.y = 2.12;
@@ -353,37 +378,168 @@ function knightUp(person, teamColor, plumeColor) {
   const shield = new THREE.Group();
   const board = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.62, 0.07), teamMat);
   shield.add(board);
-  const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.5, 0.02), new THREE.MeshStandardMaterial({ color: 0xf5f0e0, roughness: 0.8 }));
+  const crossMat = new THREE.MeshStandardMaterial({ color: 0xf5f0e0, roughness: 0.8 });
+  const crossV = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.5, 0.02), crossMat);
   crossV.position.z = 0.045;
   shield.add(crossV);
-  const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.1, 0.02), new THREE.MeshStandardMaterial({ color: 0xf5f0e0, roughness: 0.8 }));
+  const crossH = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.1, 0.02), crossMat);
   crossH.position.z = 0.045;
   crossH.position.y = 0.08;
   shield.add(crossH);
   shield.position.set(0, -0.3, 0.12);
   person.leftArm.joint.add(shield);
-  // 比武槍(右手:長錐,鈍頭護冠;隊色螺旋帶用兩節色環代替)
-  const lance = new THREE.Group();
-  const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.06, 3.1, 10), new THREE.MeshStandardMaterial({ color: 0xd9c9a8, roughness: 0.7 }));
-  shaft.rotation.x = Math.PI / 2;
-  shaft.position.z = 1.25;
-  lance.add(shaft);
-  for (let i = 0; i < 3; i += 1) {
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.22, 10), teamMat);
-    band.rotation.x = Math.PI / 2;
-    band.position.z = 0.6 + i * 0.8;
-    lance.add(band);
+
+  // —— 八般武器模型(全掛右手同一位置,visible 切換;一律朝 +z 出手) ——
+  const weapons = {};
+  const mount = (group) => {
+    group.position.set(0, -0.28, 0.1);
+    group.visible = false;
+    person.rightArm.joint.add(group);
+    return group;
+  };
+
+  { // 騎士長槍(鈍頭 coronel+護手錐)
+    const lance = new THREE.Group();
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.06, 3.1, 10), woodMat);
+    shaft.rotation.x = Math.PI / 2;
+    shaft.position.z = 1.25;
+    lance.add(shaft);
+    for (let i = 0; i < 3; i += 1) {
+      const band = new THREE.Mesh(new THREE.CylinderGeometry(0.052, 0.052, 0.22, 10), teamMat);
+      band.rotation.x = Math.PI / 2;
+      band.position.z = 0.6 + i * 0.8;
+      lance.add(band);
+    }
+    const guard = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.22, 12), steelMat);
+    guard.rotation.x = -Math.PI / 2;
+    guard.position.z = 0.28;
+    lance.add(guard);
+    const coronel = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), steelMat);
+    coronel.position.z = 2.82;
+    lance.add(coronel);
+    weapons.lance = mount(lance);
   }
-  const guard = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.22, 12), steelMat);
-  guard.rotation.x = -Math.PI / 2;
-  guard.position.z = 0.28;
-  lance.add(guard);
-  const coronel = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), steelMat); // 鈍頭(點到為止)
-  coronel.position.z = 2.82;
-  lance.add(coronel);
-  lance.position.set(0, -0.28, 0.1);
-  person.rightArm.joint.add(lance);
-  return { shield, lance };
+  { // 長矛(細長桿+葉形矛頭)
+    const spear = new THREE.Group();
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, 2.8, 10), darkWoodMat);
+    shaft.rotation.x = Math.PI / 2;
+    shaft.position.z = 1.1;
+    spear.add(shaft);
+    const blade = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.42, 10), steelMat);
+    blade.rotation.x = Math.PI / 2;
+    blade.position.z = 2.66;
+    spear.add(blade);
+    const collar = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.1, 10), teamMat);
+    collar.rotation.x = Math.PI / 2;
+    collar.position.z = 2.42;
+    spear.add(collar);
+    weapons.spear = mount(spear);
+  }
+  { // 青龍大刀(長桿+寬彎刃+紅纓)
+    const gd = new THREE.Group();
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.045, 2.2, 10), darkWoodMat);
+    pole.rotation.x = Math.PI / 2;
+    pole.position.z = 0.85;
+    gd.add(pole);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.5, 0.95), steelMat);
+    blade.position.set(0, 0.1, 2.3);
+    blade.rotation.x = -0.18;
+    gd.add(blade);
+    const bladeTip = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 4), steelMat);
+    bladeTip.rotation.x = Math.PI / 2;
+    bladeTip.rotation.y = Math.PI / 4;
+    bladeTip.position.set(0, 0.22, 2.85);
+    gd.add(bladeTip);
+    const tassel = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.22, 0.08), new THREE.MeshStandardMaterial({ color: 0xc23b22, roughness: 0.9 }));
+    tassel.position.set(0, -0.16, 1.86);
+    gd.add(tassel);
+    weapons.greatblade = mount(gd);
+  }
+  { // 騎士劍(直刃+十字護手)
+    const sword = new THREE.Group();
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.03, 0.22, 8), darkWoodMat);
+    grip.rotation.x = Math.PI / 2;
+    grip.position.z = 0.05;
+    sword.add(grip);
+    const guard = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.05, 0.06), steelMat);
+    guard.position.z = 0.18;
+    sword.add(guard);
+    const blade = new THREE.Mesh(new THREE.BoxGeometry(0.085, 0.022, 1.45), steelMat);
+    blade.position.z = 0.95;
+    sword.add(blade);
+    const pommel = new THREE.Mesh(new THREE.SphereGeometry(0.05, 8, 8), teamMat);
+    pommel.position.z = -0.08;
+    sword.add(pommel);
+    weapons.sword = mount(sword);
+  }
+  { // 彎刀(三段折角模擬弧刃)
+    const saber = new THREE.Group();
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.028, 0.028, 0.2, 8), darkWoodMat);
+    grip.rotation.x = Math.PI / 2;
+    grip.position.z = 0.05;
+    saber.add(grip);
+    const guard = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.09, 0.03, 12), steelMat);
+    guard.rotation.x = Math.PI / 2;
+    guard.position.z = 0.16;
+    saber.add(guard);
+    let ang = 0;
+    let px = 0;
+    for (let i = 0; i < 3; i += 1) {
+      const seg = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.02, 0.5), steelMat);
+      ang += 0.16;
+      px += Math.sin(ang) * 0.5 * 0.5;
+      seg.position.set(px, 0, 0.45 + i * 0.44);
+      seg.rotation.y = ang;
+      saber.add(seg);
+    }
+    weapons.saber = mount(saber);
+  }
+  { // 西洋劍(極細刃+杯型護手)
+    const rapier = new THREE.Group();
+    const grip = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.18, 8), darkWoodMat);
+    grip.rotation.x = Math.PI / 2;
+    grip.position.z = 0.04;
+    rapier.add(grip);
+    const cup = new THREE.Mesh(new THREE.SphereGeometry(0.1, 12, 8, 0, Math.PI * 2, 0, Math.PI * 0.5), steelMat);
+    cup.rotation.x = -Math.PI / 2;
+    cup.position.z = 0.16;
+    rapier.add(cup);
+    const blade = new THREE.Mesh(new THREE.CylinderGeometry(0.014, 0.02, 1.7, 8), steelMat);
+    blade.rotation.x = Math.PI / 2;
+    blade.position.z = 1.05;
+    rapier.add(blade);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), steelMat); // 鈍頭護尖
+    tip.position.z = 1.92;
+    rapier.add(tip);
+    weapons.rapier = mount(rapier);
+  }
+  { // 弓箭(弓身弧+弦;箭發射時另生成)
+    const bow = new THREE.Group();
+    const arcMesh = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.03, 8, 20, Math.PI * 1.05), darkWoodMat);
+    arcMesh.rotation.z = -Math.PI * 0.525 + Math.PI / 2;
+    bow.add(arcMesh);
+    const stringMesh = new THREE.Mesh(new THREE.BoxGeometry(0.012, 1.18, 0.012), new THREE.MeshStandardMaterial({ color: 0xe8e2d0, roughness: 0.9 }));
+    stringMesh.position.x = -0.08;
+    bow.add(stringMesh);
+    const gripWrap = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.22, 8), teamMat);
+    gripWrap.position.x = 0.6;
+    bow.add(gripWrap);
+    bow.rotation.y = Math.PI / 2; // 弓面朝前
+    weapons.bow = mount(bow);
+  }
+  { // 雙綠鋼球(手握一顆+備用一顆;投出時另生成)
+    const balls = new THREE.Group();
+    const ballMat = new THREE.MeshStandardMaterial({ color: 0x2ecc40, metalness: 0.5, roughness: 0.3, emissive: 0x1a7a26, emissiveIntensity: 0.55 });
+    const b1 = new THREE.Mesh(new THREE.SphereGeometry(0.13, 14, 12), ballMat);
+    b1.position.z = 0.22;
+    balls.add(b1);
+    const b2 = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 12), ballMat);
+    b2.position.set(0.16, 0.05, 0.02);
+    balls.add(b2);
+    weapons.greenballs = mount(balls);
+  }
+
+  return { shield, weapons };
 }
 
 export class JoustingGame {
@@ -396,6 +552,7 @@ export class JoustingGame {
     this.modeId = GAME_MODES[settings.modeId] ? settings.modeId : "duel";
     this.mode = getModeConfig(this.modeId);
     this.coatId = HORSE_COATS[settings.horseCoat] ? settings.horseCoat : "brown";
+    this.weaponId = WEAPONS[settings.weaponId] ? settings.weaponId : "lance";
 
     this.input = new InputManager();
     this.input.bindTouchButtons(this.touchRoot);
@@ -405,28 +562,16 @@ export class JoustingGame {
 
     this.running = false; // ★只給主迴圈 RAF 用
     this.time = 0;
-    this.phase = "menu"; // menu | gate | charging | passing | reset | ended
-    this.message = "在首頁選擇模式與難度後開始。";
+    this.phase = "menu"; // menu | gate | battle | ended
+    this.message = "在首頁選擇模式、難度與武器後開始。";
     this.cameraView = 0; // 0 跟隨 1 側面轉播 2 高空 3 馬上
     this.autoSaveTimer = 0;
 
-    // 對衝狀態
-    this.passNo = 1;
-    this.myScore = 0;
-    this.aiScore = 0;
-    this.myZ = -LANE_HALF;
-    this.aiZ = LANE_HALF;
-    this.speed = 0;
-    this.aiSpeed = 0;
-    this.gallopT = 0;
-    this.aiGallopT = 0;
-    this.armed = false; // 本回合已出槍
-    this.myQuality = null;
-    this.lastResult = null; // {mine, theirs} 每回合結果文字
-    this.resetT = 0;
-    this.hitReactT = 9; // 被擊中後仰計時
-    this.aiHitReactT = 9;
-    this.strikeAnimT = 9; // 出槍前刺動畫
+    this.roundNo = 0; // 「回合」=雙方出手總次數(大戰三百回合!)
+    this.lastHit = null; // {who, dmg, weapon} 顯示上一擊
+    this.projectiles = [];
+    this.hitCamT = 9; // 命中慢動作/特寫計時
+    this.endT = -1; // KO 落馬演出 → 終場
 
     this.overlay = { visible: false, eyebrow: "", title: "", text: "", canResume: false };
 
@@ -442,7 +587,7 @@ export class JoustingGame {
     this.scene.fog = new THREE.Fog(0x9fd0ee, 70, 180);
 
     this.camera = new THREE.PerspectiveCamera(52, 1, 0.1, 260);
-    this.camPos = new THREE.Vector3(4, 5, -LANE_HALF - 10);
+    this.camPos = new THREE.Vector3(4, 5, -24);
     this.camLook = new THREE.Vector3(0, 1.4, 0);
     this.camera.position.copy(this.camPos);
 
@@ -460,7 +605,7 @@ export class JoustingGame {
     if (this.onEvent) this.onEvent({ type, ...payload });
   }
 
-  // ---------- 場景:比武場+分隔柵+看台 ----------
+  // ---------- 場景:開放競技場(無分隔柵)+圍場欄+看台 ----------
   setupScene() {
     const sun = new THREE.HemisphereLight(0xffffff, 0x557040, 1.3);
     this.scene.add(sun);
@@ -475,57 +620,73 @@ export class JoustingGame {
     grass.rotation.x = -Math.PI / 2;
     grass.position.y = -0.02;
     this.scene.add(grass);
-    // 比武沙道
-    const sand = new THREE.Mesh(new THREE.PlaneGeometry(14, LANE_HALF * 2 + 24), new THREE.MeshStandardMaterial({ color: 0xd2bd93, roughness: 1 }));
+    // 開放式比武沙場(方形大場地,中間不設任何阻擋)
+    const sand = new THREE.Mesh(new THREE.PlaneGeometry(ARENA_HALF * 2 + 8, ARENA_HALF * 2 + 8), new THREE.MeshStandardMaterial({ color: 0xd2bd93, roughness: 1 }));
     sand.rotation.x = -Math.PI / 2;
     this.scene.add(sand);
 
-    // 分隔柵(tilt barrier):中線木柵一路到底
-    const tiltMat = new THREE.MeshStandardMaterial({ color: 0x8a5a2b, roughness: 0.8 });
-    const tilt = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.4, LANE_HALF * 2 + 10), tiltMat);
-    tilt.position.set(0, 0.7, 0);
-    this.scene.add(tilt);
-    const tiltTop = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.08, LANE_HALF * 2 + 10), new THREE.MeshStandardMaterial({ color: 0xa8763c, roughness: 0.7 }));
-    tiltTop.position.set(0, 1.44, 0);
-    this.scene.add(tiltTop);
+    // 周邊圍場欄(只在場地邊界,場中央完全開放)
+    const railMat = new THREE.MeshStandardMaterial({ color: 0x8a5a2b, roughness: 0.8 });
+    const postMat = new THREE.MeshStandardMaterial({ color: 0x6d4a26, roughness: 0.8 });
+    const F = ARENA_HALF + 2.4;
+    for (const [sx, sz, len, horizontal] of [
+      [0, -F, F * 2, true],
+      [0, F, F * 2, true],
+      [-F, 0, F * 2, false],
+      [F, 0, F * 2, false],
+    ]) {
+      const rail = new THREE.Mesh(new THREE.BoxGeometry(horizontal ? len : 0.12, 0.1, horizontal ? 0.12 : len), railMat);
+      rail.position.set(sx, 1.1, sz);
+      this.scene.add(rail);
+      const railLow = rail.clone();
+      railLow.position.y = 0.6;
+      this.scene.add(railLow);
+      const count = 10;
+      for (let i = 0; i <= count; i += 1) {
+        const t = -len / 2 + (len / count) * i;
+        const post = new THREE.Mesh(new THREE.BoxGeometry(0.14, 1.3, 0.14), postMat);
+        post.position.set(horizontal ? t : sx, 0.65, horizontal ? sz : t);
+        this.scene.add(post);
+      }
+    }
 
-    // 兩端起跑旗門
+    // 四角彩旗
     const poleMat = new THREE.MeshStandardMaterial({ color: 0xe9e2d2, roughness: 0.8 });
-    for (const endZ of [-LANE_HALF - 3, LANE_HALF + 3]) {
-      for (const px of [-4, 4]) {
-        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.4, 8), poleMat);
-        pole.position.set(px, 1.7, endZ);
+    for (const cx of [-F, F]) {
+      for (const cz of [-F, F]) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.6, 8), poleMat);
+        pole.position.set(cx, 1.8, cz);
         this.scene.add(pole);
         const flag = new THREE.Mesh(
           new THREE.PlaneGeometry(0.9, 0.5),
-          new THREE.MeshStandardMaterial({ color: px < 0 ? 0xb03030 : 0x2f5f9a, roughness: 0.85, side: THREE.DoubleSide }),
+          new THREE.MeshStandardMaterial({ color: cx < 0 ? 0xb03030 : 0x2f5f9a, roughness: 0.85, side: THREE.DoubleSide }),
         );
-        flag.position.set(px + 0.5, 3.1, endZ);
+        flag.position.set(cx + 0.5, 3.3, cz);
         this.scene.add(flag);
       }
     }
-    // 沿道彩旗
-    for (let i = 0; i < 9; i += 1) {
-      const z = -LANE_HALF + i * (LANE_HALF * 2 / 8);
+    // 沿邊彩旗
+    for (let i = 0; i < 7; i += 1) {
+      const z = -ARENA_HALF + i * (ARENA_HALF * 2 / 6);
       for (const side of [-1, 1]) {
         const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.6, 8), poleMat);
-        pole.position.set(side * 6.5, 1.3, z);
+        pole.position.set(side * (F + 1.2), 1.3, z);
         this.scene.add(pole);
         const pennant = new THREE.Mesh(
           new THREE.PlaneGeometry(0.55, 0.3),
           new THREE.MeshStandardMaterial({ color: i % 2 ? 0xf6d743 : (side < 0 ? 0xb03030 : 0x2f5f9a), roughness: 0.85, side: THREE.DoubleSide }),
         );
-        pennant.position.set(side * 6.5 + 0.3, 2.45, z);
+        pennant.position.set(side * (F + 1.2) + 0.3, 2.45, z);
         this.scene.add(pennant);
       }
     }
 
-    // 觀眾看台(兩側,有臉)
+    // 觀眾看台(兩側,退到圍欄外)
     this.crowd = new THREE.Group();
     const standMat = new THREE.MeshStandardMaterial({ color: 0x6b7687, roughness: 0.85 });
     for (const side of [-1, 1]) {
       const stand = new THREE.Mesh(new THREE.BoxGeometry(5, 3.2, 70), standMat);
-      stand.position.set(side * 12.5, 1.6, 0);
+      stand.position.set(side * (F + 6.5), 1.6, 0);
       this.scene.add(stand);
       const shirts = [0xd98a3d, 0x3d78d9, 0xc94f8f, 0x4fae6a, 0xb0552f, 0x8a5ac0];
       for (let i = 0; i < 8; i += 1) {
@@ -536,44 +697,29 @@ export class JoustingGame {
           gender: (i + (side > 0 ? 1 : 0)) % 2 === 0 ? "m" : "f",
           scale: 0.92,
         });
-        p.group.position.set(side * 9.2, 0, -31 + i * 9);
-        p.group.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2; // 臉朝比武道
+        p.group.position.set(side * (F + 3.4), 0, -31 + i * 9);
+        p.group.rotation.y = side > 0 ? -Math.PI / 2 : Math.PI / 2; // 臉朝比武場
         this.crowd.add(p.group);
       }
     }
     this.scene.add(this.crowd);
 
-    // 我方:紅騎士(玩家,右道 x=+LANE_X 朝 +z);對手:藍騎士(左道朝 -z)
+    // 我方:紅騎士;對手:藍騎士
     const coat = HORSE_COATS[this.coatId] || HORSE_COATS.brown;
-    this.myHorse = makeHorse({ coat: coat.coat, mane: coat.mane, caparison: 0xb03030 });
-    this.scene.add(this.myHorse.group);
-    this.me = makePerson({ shirt: 0xb03030, pants: 0x5a2a2a, scale: 0.95 });
-    this.me.leftLeg.pivot.rotation.x = -1.25;
-    this.me.leftLeg.pivot.rotation.z = 0.5;
-    this.me.leftLeg.joint.rotation.x = 1.5;
-    this.me.rightLeg.pivot.rotation.x = -1.25;
-    this.me.rightLeg.pivot.rotation.z = -0.5;
-    this.me.rightLeg.joint.rotation.x = 1.5;
-    this.myGear = knightUp(this.me, 0xb03030, 0xf6d743);
-    this.me.group.position.set(0, 0.82, 0.12);
-    this.me.group.scale.setScalar(0.95);
-    this.myHorse.rig.add(this.me.group);
+    this.my = this.makeRider({
+      coat: coat.coat, mane: coat.mane, caparison: 0xb03030,
+      shirt: 0xb03030, pants: 0x5a2a2a, team: 0xb03030, plume: 0xf6d743,
+    });
+    this.foe = this.makeRider({
+      coat: 0x4a4a52, mane: 0x1c1c22, caparison: 0x2f5f9a,
+      shirt: 0x2f5f9a, pants: 0x24304a, team: 0x2f5f9a, plume: 0xf5f0e0,
+    });
+    this.foe.brain = { retreatT: 0, switchT: 5, orbitDir: 1 };
 
-    this.aiHorse = makeHorse({ coat: 0x4a4a52, mane: 0x1c1c22, caparison: 0x2f5f9a });
-    this.scene.add(this.aiHorse.group);
-    this.ai = makePerson({ shirt: 0x2f5f9a, pants: 0x24304a, scale: 0.95 });
-    this.ai.leftLeg.pivot.rotation.x = -1.25;
-    this.ai.leftLeg.pivot.rotation.z = 0.5;
-    this.ai.leftLeg.joint.rotation.x = 1.5;
-    this.ai.rightLeg.pivot.rotation.x = -1.25;
-    this.ai.rightLeg.pivot.rotation.z = -0.5;
-    this.ai.rightLeg.joint.rotation.x = 1.5;
-    this.aiGear = knightUp(this.ai, 0x2f5f9a, 0xf5f0e0);
-    this.ai.group.position.set(0, 0.82, 0.12);
-    this.ai.group.scale.setScalar(0.95);
-    this.aiHorse.rig.add(this.ai.group);
+    this.setRiderWeapon(this.my, this.weaponId);
+    this.setRiderWeapon(this.foe, "lance");
 
-    // 擊中閃光(盾上亮一圈)
+    // 擊中閃光(被擊者身上亮一圈)
     this.hitFlash = new THREE.Mesh(
       new THREE.RingGeometry(0.2, 0.42, 24),
       new THREE.MeshBasicMaterial({ color: 0xffe14d, transparent: true, opacity: 0, side: THREE.DoubleSide }),
@@ -581,23 +727,107 @@ export class JoustingGame {
     this.scene.add(this.hitFlash);
     this.hitFlashT = 9;
 
-    this.placeRiders();
+    this.resetRiders();
   }
 
-  placeRiders() {
-    // 玩家在 x=+LANE_X 朝 +z;AI 在 x=-LANE_X 朝 -z(左肩對左肩,盾側面向分隔柵)
-    this.myHorse.group.position.set(LANE_X, 0, this.myZ);
-    this.myHorse.group.rotation.y = 0;
-    this.aiHorse.group.position.set(-LANE_X, 0, this.aiZ);
-    this.aiHorse.group.rotation.y = Math.PI;
+  makeRider({ coat, mane, caparison, shirt, pants, team, plume }) {
+    const horse = makeHorse({ coat, mane, caparison });
+    this.scene.add(horse.group);
+    const person = makePerson({ shirt, pants, scale: 0.95 });
+    person.leftLeg.pivot.rotation.x = -1.25;
+    person.leftLeg.pivot.rotation.z = 0.5;
+    person.leftLeg.joint.rotation.x = 1.5;
+    person.rightLeg.pivot.rotation.x = -1.25;
+    person.rightLeg.pivot.rotation.z = -0.5;
+    person.rightLeg.joint.rotation.x = 1.5;
+    const gear = knightUp(person, team, plume);
+    person.group.position.set(0, 0.82, 0.12);
+    person.group.scale.setScalar(0.95);
+    horse.rig.add(person.group);
+    return {
+      horse, person, gear,
+      pos: new THREE.Vector3(), heading: 0, speed: 0,
+      hp: 100, weaponId: "lance", cd: 0,
+      strikeT: 9, hitT: 9, stunT: 9, koT: -1, gallopT: 0,
+    };
+  }
+
+  resetRiders() {
+    const hp = this.mode.hp || 100;
+    for (const [rider, z, heading] of [[this.my, -14, 0], [this.foe, 14, Math.PI]]) {
+      rider.pos.set(0, 0, z);
+      rider.heading = heading;
+      rider.speed = 0;
+      rider.hp = hp;
+      rider.cd = 0;
+      rider.strikeT = 9;
+      rider.hitT = 9;
+      rider.stunT = 9;
+      rider.koT = -1;
+      rider.person.group.rotation.z = 0;
+      rider.person.group.position.set(0, 0.82, 0.12);
+    }
+    this.roundNo = 0;
+    this.lastHit = null;
+    this.endT = -1;
+    this.hitCamT = 9;
+    for (const p of this.projectiles) this.scene.remove(p.mesh);
+    this.projectiles = [];
+    this._shotQueue = [];
+    this.setRiderWeapon(this.my, this.weaponId);
+    this.setRiderWeapon(this.foe, WEAPON_ORDER[Math.floor(Math.random() * 6)]); // AI 開場拿一把近戰
+    if (this.foe.brain) {
+      this.foe.brain.retreatT = 0;
+      this.foe.brain.switchT = 5 + Math.random() * 4;
+      this.foe.brain.orbitDir = Math.random() < 0.5 ? -1 : 1;
+    }
+    this.syncRiderTransforms();
+    // 鏡頭硬切到玩家後方(lerp 穿場鐵則)
+    const fwd = new THREE.Vector3(Math.sin(this.my.heading), 0, Math.cos(this.my.heading));
+    this.camPos.copy(this.my.pos).addScaledVector(fwd, -8.5).setY(4.2);
+    this.camLook.copy(this.my.pos).addScaledVector(fwd, 10).setY(1.6);
+  }
+
+  syncRiderTransforms() {
+    for (const rider of [this.my, this.foe]) {
+      rider.horse.group.position.set(rider.pos.x, 0, rider.pos.z);
+      rider.horse.group.rotation.y = rider.heading;
+    }
+  }
+
+  setRiderWeapon(rider, weaponId) {
+    if (!WEAPONS[weaponId]) return;
+    rider.weaponId = weaponId;
+    for (const [id, model] of Object.entries(rider.gear.weapons)) {
+      model.visible = id === weaponId;
+    }
+  }
+
+  // 玩家換武器(選單/戰鬥中皆可;戰鬥中換=0.35s 小硬直,防連點)
+  setPlayerWeapon(weaponId, announce = true) {
+    if (!WEAPONS[weaponId] || this.my.weaponId === weaponId) return;
+    this.setRiderWeapon(this.my, weaponId);
+    this.weaponId = weaponId;
+    if (this.phase === "battle") this.my.cd = Math.max(this.my.cd, 0.35);
+    saveSettings({ difficulty: this.difficulty, modeId: this.modeId, horseCoat: this.coatId, weaponId });
+    if (announce) {
+      this.message = `換上${WEAPONS[weaponId].label}——${WEAPONS[weaponId].hint}!`;
+      this.emitEvent("weapon-switch", { who: "me", label: WEAPONS[weaponId].label });
+    }
+    this.pushHud();
+  }
+
+  cyclePlayerWeapon() {
+    const i = WEAPON_ORDER.indexOf(this.my.weaponId);
+    this.setPlayerWeapon(WEAPON_ORDER[(i + 1) % WEAPON_ORDER.length]);
   }
 
   setHorseCoat(coatId) {
     if (!HORSE_COATS[coatId]) return;
     this.coatId = coatId;
-    if (this.myHorse) {
-      this.myHorse.coatMat.color.setHex(HORSE_COATS[coatId].coat);
-      this.myHorse.maneMat.color.setHex(HORSE_COATS[coatId].mane);
+    if (this.my) {
+      this.my.horse.coatMat.color.setHex(HORSE_COATS[coatId].coat);
+      this.my.horse.maneMat.color.setHex(HORSE_COATS[coatId].mane);
     }
   }
 
@@ -611,135 +841,207 @@ export class JoustingGame {
   }
 
   // ---------- 局面控制 ----------
-  applyPresentation({ difficulty, modeId, horseCoat }) {
+  applyPresentation({ difficulty, modeId, horseCoat, weaponId }) {
     if (difficulty && DIFFICULTY_PRESETS[difficulty]) this.difficulty = difficulty;
     if (modeId && GAME_MODES[modeId]) {
       this.modeId = modeId;
       this.mode = getModeConfig(modeId);
     }
     if (horseCoat && HORSE_COATS[horseCoat]) this.setHorseCoat(horseCoat);
-    saveSettings({ difficulty: this.difficulty, modeId: this.modeId, horseCoat: this.coatId });
-    this.message = `${this.mode.label} · ${DIFFICULTY_LABELS[this.difficulty]} · ${HORSE_COATS[this.coatId].label} 已設定。`;
+    if (weaponId && WEAPONS[weaponId]) {
+      this.weaponId = weaponId;
+      this.setRiderWeapon(this.my, weaponId);
+    }
+    saveSettings({ difficulty: this.difficulty, modeId: this.modeId, horseCoat: this.coatId, weaponId: this.weaponId });
+    this.message = `${this.mode.label} · ${DIFFICULTY_LABELS[this.difficulty]} · ${WEAPONS[this.weaponId].label} 已設定。`;
     this.pushHud();
   }
 
   openHomeMenu() {
     this.phase = "menu";
     this.overlay.visible = false;
-    this.message = "在首頁選擇模式與難度後開始。";
+    this.message = "在首頁選擇模式、難度與武器後開始。";
     this.pushHud();
   }
 
   startSelectedMatch() {
-    this.passNo = 1;
-    this.myScore = 0;
-    this.aiScore = 0;
-    this.lastResult = null;
-    this.beginPass(true);
+    this.resetRiders();
+    this.phase = "gate";
+    this.message = "點畫面(或空白鍵)開戰!W/S 前進後退、A/D 轉向,1-8 或 Q 換武器。";
     this.emitEvent("match-start", { mode: this.mode.label });
     this.pushHud();
   }
 
-  beginPass(first = false) {
-    this.myZ = -LANE_HALF;
-    this.aiZ = LANE_HALF;
-    this.speed = 0;
-    this.aiSpeed = 0;
-    this.armed = false;
-    this.myQuality = null;
-    this.aiStruck = false;
-    this.strikeAnimT = 9;
-    this.aiStrikeAnimT = 9;
-    this.hitReactT = 9;
-    this.aiHitReactT = 9;
-    this.placeRiders();
-    // 鏡頭硬切到玩家後方(lerp 穿場鐵則)
-    this.camPos.set(LANE_X + 2.2, 4.2, this.myZ - 9);
-    this.camLook.set(LANE_X, 1.6, this.myZ + 8);
-    this.phase = "gate";
-    this.message = first
-      ? "點畫面吹號衝鋒!對手接近、時機條進綠區時再點一下「出槍」!"
-      : `第 ${this.passNo} 回合——點畫面衝鋒!`;
-    this.pushHud();
-  }
-
-  // 出發/出槍共用(點畫面/空白鍵)
+  // 出手/開戰共用(點畫面/空白鍵)
   strike() {
     if (this.overlay.visible) return;
     if (this.phase === "gate") {
-      this.phase = "charging";
-      this.emitEvent("charge", { pass: this.passNo });
-      this.message = "衝鋒!按住 W/↑ 全速——盯住時機條,綠區出槍!";
+      this.phase = "battle";
+      this.emitEvent("battle-start", {});
+      this.message = "開戰!自由走位,靠近時看準時機出手!";
       this.pushHud();
       return;
     }
-    if (this.phase !== "charging" || this.armed) return;
-    const gap = this.aiZ - this.myZ; // 兩騎距離
-    if (gap > ARM_RANGE) {
-      this.message = "太早出槍了——等對手進到時機條亮起再出!";
-      this.emitEvent("strike-early");
-      this.pushHud();
-      return;
-    }
-    this.armed = true;
-    this.strikeAnimT = 0;
-    const preset = DIFFICULTY_PRESETS[this.difficulty];
-    const closing = Math.max(this.speed + this.aiSpeed, 1);
-    const err = Math.abs(gap - STRIKE_IDEAL) / closing;
-    let q = clamp(1 - err / (preset.window * 2.2), 0, 1);
-    q = clamp(q + preset.assist * (1 - q), 0, 1);
-    this.myQuality = q;
-    this.emitEvent("strike", { quality: q });
-    this.pushHud();
+    if (this.phase !== "battle" || this.my.koT >= 0) return;
+    this.attack(this.my, this.foe);
   }
 
-  resolvePass() {
+  // ---------- 戰鬥核心(玩家/AI 共用同一條路徑:同規則原則) ----------
+  attack(rider, target) {
+    if (this.phase !== "battle" || this.endT >= 0) return;
+    if (rider.cd > 0 || rider.stunT < (this._stunDur(rider) || 0) || rider.koT >= 0) return;
+    const w = WEAPONS[rider.weaponId];
     const preset = DIFFICULTY_PRESETS[this.difficulty];
-    // 我方得分
-    let myPts = 0;
-    if (this.myQuality !== null) {
-      myPts = this.myQuality >= 0.85 ? 2 : this.myQuality >= 0.45 ? 1 : 0;
+    const isPlayer = rider === this.my;
+    rider.cd = w.cd * (isPlayer ? 1 : preset.aiCd);
+    rider.strikeT = 0;
+    this.roundNo += 1;
+
+    if (w.ranged) {
+      const volley = w.volley || 1;
+      for (let i = 0; i < volley; i += 1) {
+        this._queueShot(rider, target, w, i * 0.18);
+      }
+      this.emitEvent("shoot", { who: isPlayer ? "me" : "ai", weapon: w.label });
+      if (isPlayer) this.message = `${w.label}出手!`;
+      this.pushHud();
+      return;
     }
-    // 對手出槍品質(依難度;練習場不計分)
-    const aiQ = clamp(preset.aiSkill + (Math.random() * 2 - 1) * 0.28, 0, 1);
-    let aiPts = this.mode.endless ? 0 : aiQ >= 0.85 ? 2 : aiQ >= 0.45 ? 1 : 0;
-    this.myScore += myPts;
-    this.aiScore += aiPts;
-    const mineText = myPts === 2 ? "正中盾心!+2" : myPts === 1 ? "擦中盾牌 +1" : this.myQuality === null ? "沒出槍" : "落空";
-    const theirsText = aiPts === 2 ? "對手正中 +2" : aiPts === 1 ? "對手擦中 +1" : "對手落空";
-    this.lastResult = { mine: mineText, theirs: theirsText, myPts, aiPts };
-    // 被擊中反應(無 KO:後仰+盾閃,不落馬)
-    if (aiPts > 0) this.hitReactT = 0;
-    if (myPts > 0) {
-      this.aiHitReactT = 0;
-      // 盾上閃光(對手盾=世界座標近似)
-      this.hitFlash.position.set(-LANE_X + 0.3, 2.2, (this.myZ + this.aiZ) / 2);
-      this.hitFlashT = 0;
+
+    // 近戰:距離+朝向幾何判定(判定=畫面)
+    const dist = rider.pos.distanceTo(target.pos);
+    const assist = isPlayer ? preset.assist : 0;
+    const reach = w.reach + BODY_REACH + assist * 0.8;
+    const toTarget = Math.atan2(target.pos.x - rider.pos.x, target.pos.z - rider.pos.z);
+    const facing = Math.abs(wrapAngle(toTarget - rider.heading)) <= w.arc + assist * 0.5;
+    let lands = dist <= reach && facing;
+    // AI 命中率門檻(擬人:就算站對位置也會有失手)
+    if (lands && !isPlayer && Math.random() > clamp(preset.aiSkill + 0.18, 0, 0.95)) lands = false;
+    if (lands) {
+      let dmg = w.dmg;
+      if (w.chargeBonus) dmg *= 1 + w.chargeBonus * clamp(Math.abs(rider.speed) / preset.maxFwd, 0, 1);
+      dmg *= isPlayer ? 1 + assist * 0.6 : preset.aiDmg;
+      this.applyHit(target, Math.round(dmg), { who: isPlayer ? "me" : "ai", weapon: w, stun: 0 });
+    } else {
+      this.emitEvent("miss", { who: isPlayer ? "me" : "ai" });
+      if (isPlayer) {
+        this.message = dist > reach ? "太遠了——再靠近一點出手!" : "沒對準——把馬頭轉向對手再出手!";
+        this.pushHud();
+      }
     }
-    this.emitEvent("pass-result", { pass: this.passNo, myPts, aiPts, myScore: this.myScore, aiScore: this.aiScore, mineText, theirsText });
-    this.message = `${mineText}、${theirsText}(我 ${this.myScore}:${this.aiScore} 對手)`;
-    this.phase = "reset";
-    this.resetT = 0;
+  }
+
+  _stunDur() {
+    return 1.1; // 鋼球暈眩秒數(stunT < 此值=暈眩中)
+  }
+
+  _queueShot(rider, target, w, delay) {
+    // 由 update 消化的延遲發射佇列(雙鋼球兩顆連投)
+    this._shotQueue = this._shotQueue || [];
+    this._shotQueue.push({ rider, target, w, t: delay });
+  }
+
+  _fireProjectile(rider, target, w) {
+    if (rider.koT >= 0 || this.phase !== "battle") return;
+    const isPlayer = rider === this.my;
+    const preset = DIFFICULTY_PRESETS[this.difficulty];
+    const from = rider.pos.clone().setY(2.0);
+    const fwdOffset = new THREE.Vector3(Math.sin(rider.heading), 0, Math.cos(rider.heading));
+    from.addScaledVector(fwdOffset, 0.8);
+    // 瞄準:預測目標移動(玩家=自動輔瞄;AI 依 aiSkill 加誤差)
+    const targetPoint = target.pos.clone().setY(1.8);
+    const dist = from.distanceTo(targetPoint);
+    const flight = dist / w.projSpeed;
+    const targetVel = new THREE.Vector3(Math.sin(target.heading), 0, Math.cos(target.heading)).multiplyScalar(target.speed);
+    targetPoint.addScaledVector(targetVel, flight * (isPlayer ? 0.85 : preset.aiSkill));
+    if (!isPlayer) {
+      const err = (1 - preset.aiSkill) * 3.2;
+      targetPoint.x += (Math.random() * 2 - 1) * err;
+      targetPoint.z += (Math.random() * 2 - 1) * err;
+    }
+    const dir = targetPoint.clone().sub(from).normalize();
+    const vel = dir.multiplyScalar(w.projSpeed);
+
+    let mesh;
+    if (rider.weaponId === "greenballs") {
+      vel.y += 2.2; // 拋物線投擲
+      mesh = new THREE.Mesh(
+        new THREE.SphereGeometry(0.14, 12, 10),
+        new THREE.MeshStandardMaterial({ color: 0x2ecc40, metalness: 0.5, roughness: 0.3, emissive: 0x1a7a26, emissiveIntensity: 0.6 }),
+      );
+    } else {
+      mesh = new THREE.Group();
+      const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.9, 6), new THREE.MeshStandardMaterial({ color: 0x8a6a3c, roughness: 0.8 }));
+      shaft.rotation.x = Math.PI / 2;
+      mesh.add(shaft);
+      const tip = new THREE.Mesh(new THREE.SphereGeometry(0.045, 8, 8), new THREE.MeshStandardMaterial({ color: 0xb9c0c8, metalness: 0.6, roughness: 0.4 })); // 鈍頭箭
+      tip.position.z = 0.48;
+      mesh.add(tip);
+      const fletch = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.1, 0.14), new THREE.MeshStandardMaterial({ color: isPlayer ? 0xb03030 : 0x2f5f9a, roughness: 0.9 }));
+      fletch.position.z = -0.42;
+      mesh.add(fletch);
+      mesh.lookAt(mesh.position.clone().add(vel));
+    }
+    mesh.position.copy(from);
+    this.scene.add(mesh);
+    this.projectiles.push({
+      mesh, vel, t: 0,
+      dmg: Math.round(w.dmg * (isPlayer ? 1 + preset.assist * 0.6 : preset.aiDmg)),
+      stun: w.stun || 0,
+      target,
+      who: isPlayer ? "me" : "ai",
+      weapon: w,
+      isBall: rider.weaponId === "greenballs",
+    });
+  }
+
+  applyHit(target, dmg, { who, weapon, stun }) {
+    if (this.phase !== "battle" || target.koT >= 0 || this.endT >= 0) return;
+    target.hp = Math.max(0, target.hp - dmg);
+    target.hitT = 0;
+    if (stun) target.stunT = 0;
+    // 撞退一小步(打擊感,幅度小,兒童安全)
+    target.speed *= 0.4;
+    this.hitFlash.position.copy(target.pos).setY(1.9);
+    this.hitFlash.material.color.setHex(stun ? 0x6dff7a : 0xffe14d);
+    this.hitFlashT = 0;
+    this.hitCamT = 0;
+    const isMe = who === "me";
+    this.lastHit = { who, dmg, weapon: weapon.short };
+    this.emitEvent("hit", {
+      who, dmg, weapon: weapon.label, stun: !!stun,
+      myHp: this.my.hp, aiHp: this.foe.hp, round: this.roundNo,
+    });
+    this.message = isMe
+      ? `${weapon.label}命中!對手 -${dmg}${stun ? "(暈眩!)" : ""}`
+      : `被對手的${weapon.label}擊中 -${dmg}${stun ? "(暈眩!)" : ""}——拉開距離再反擊!`;
+    if (target.hp <= 0) {
+      target.koT = 0;
+      this.endT = 0; // 溫柔落馬演出後結算
+      this.emitEvent("ko", { winner: isMe ? "me" : "ai" });
+    }
     this.pushHud();
   }
 
   finishMatch() {
     this.phase = "ended";
-    const win = this.myScore > this.aiScore;
-    const draw = this.myScore === this.aiScore;
+    const win = this.foe.hp <= 0 && this.my.hp > 0;
+    const draw = this.my.hp === this.foe.hp;
+    const byRounds = this.mode.roundCap && this.roundNo >= this.mode.roundCap && this.my.hp > 0 && this.foe.hp > 0;
+    const rWin = byRounds ? this.my.hp > this.foe.hp : win;
     this.overlay = {
       visible: true,
-      eyebrow: win ? "勝利!" : draw ? "平手" : "惜敗",
-      title: `${this.myScore}:${this.aiScore}`,
-      text: win
-        ? "紅騎士獲勝!點到為止、贏得漂亮——真正的騎士精神!"
+      eyebrow: rWin ? "勝利!" : draw ? "平手" : "惜敗",
+      title: byRounds ? `三百回合戰滿 ${this.my.hp}:${this.foe.hp}` : rWin ? "紅騎士獲勝!" : "藍騎士獲勝!",
+      text: rWin
+        ? `大戰 ${this.roundNo} 回合,紅騎士技高一籌!鈍頭武器點到為止——真正的騎士精神!`
         : draw
-          ? "勢均力敵!再來一場分高下!"
-          : "這場讓對手拿下了——盯緊綠區、敢全速再衝一次!",
+          ? "勢均力敵!換一把武器再來一場!"
+          : `大戰 ${this.roundNo} 回合,這場讓對手拿下了——記得多走位、看準冷卻好了再出手!`,
       canResume: false,
     };
-    this.emitEvent("match-end", { win, draw, myScore: this.myScore, aiScore: this.aiScore });
-    this.message = `比武結束——${this.myScore}:${this.aiScore}。`;
+    this.emitEvent("match-end", { win: rWin, draw, myHp: this.my.hp, aiHp: this.foe.hp, rounds: this.roundNo });
+    this.message = `比武結束——大戰 ${this.roundNo} 回合。`;
     this.saveGame(true);
     this.pushHud();
   }
@@ -798,48 +1100,25 @@ export class JoustingGame {
     this.time += delta;
     const paused = this.overlay.visible;
 
-    // 交錯慢動作(07-15 bug 修:出槍一眨眼看不到)——gap<7m 進 0.38 倍速,直到錯身
-    const gapNow = this.aiZ - this.myZ;
-    this._slowMo = !paused && this.phase === "charging" && gapNow < 7 ? 0.38 : 1;
+    // 命中瞬間慢動作(0.4s,打擊感)
+    this._slowMo = !paused && this.hitCamT < 0.4 ? 0.42 : 1;
     const sdt = delta * this._slowMo;
 
-    if (!paused && this.phase === "charging") {
-      const preset = DIFFICULTY_PRESETS[this.difficulty];
-      const boosting = this.input.isDown("up") || this.input.isDown("sprint");
-      const slowing = this.input.isDown("down");
-      const target = preset.baseSpeed + (boosting ? preset.boost : 0) - (slowing ? 2.0 : 0);
-      this.speed += (Math.max(4, target) - this.speed) * Math.min(1, sdt * 2.0);
-      this.aiSpeed += (preset.baseSpeed + preset.boost * 0.55 - this.aiSpeed) * Math.min(1, sdt * 2.0);
-      this.myZ += this.speed * sdt;
-      this.aiZ -= this.aiSpeed * sdt;
-      this.gallopT += sdt * (this.speed / 8);
-      this.aiGallopT += sdt * (this.aiSpeed / 8);
-      // AI 出槍演出(判定仍在 resolvePass;這裡只演)
-      if (this.aiStrikeAnimT > 1 && gapNow <= 3.4) this.aiStrikeAnimT = 0;
+    if (!paused && this.phase === "battle") {
+      this.updatePlayerMovement(sdt);
+      this.updateAi(sdt); // 練習場 AI 仍走位(只是不出手)
+      this.updateProjectiles(sdt);
+      this.resolveBodyPush();
+      this.syncRiderTransforms();
 
-      // 交錯瞬間=結算(判定=畫面:分數在出槍當下已定,這裡演出來)
-      if (this.aiZ - this.myZ <= 0.4) {
-        this.resolvePass();
+      // 三百回合戰滿判定(epic)
+      if (this.mode.roundCap && this.roundNo >= this.mode.roundCap && this.endT < 0 && this.my.hp > 0 && this.foe.hp > 0) {
+        this.endT = 0.01; // 直接進結算(無落馬)
       }
-    } else if (!paused && this.phase === "reset") {
-      // 交錯後滑行減速 1.6s → 下一回合 / 終場
-      this.resetT += delta;
-      this.speed += (0 - this.speed) * Math.min(1, delta * 2.2);
-      this.aiSpeed += (0 - this.aiSpeed) * Math.min(1, delta * 2.2);
-      this.myZ += this.speed * delta;
-      this.aiZ -= this.aiSpeed * delta;
-      this.gallopT += delta * (this.speed / 8);
-      this.aiGallopT += delta * (this.aiSpeed / 8);
-      if (this.resetT >= 1.8) {
-        const raceTo = this.mode.race;
-        const duelOver = !this.mode.endless && !raceTo && this.passNo >= DIFFICULTY_PRESETS[this.difficulty].passes;
-        const raceOver = raceTo && (this.myScore >= raceTo || this.aiScore >= raceTo);
-        if (duelOver || raceOver) {
-          this.finishMatch();
-        } else {
-          this.passNo += 1;
-          this.beginPass();
-        }
+      // KO 落馬演出 → 終場
+      if (this.endT >= 0) {
+        this.endT += delta;
+        if (this.endT >= 1.6) this.finishMatch();
       }
     }
 
@@ -852,10 +1131,14 @@ export class JoustingGame {
     } else {
       this.hitFlash.material.opacity = 0;
     }
-    this.hitReactT += sdt;
-    this.aiHitReactT += sdt;
-    this.strikeAnimT += sdt;
-    this.aiStrikeAnimT = (this.aiStrikeAnimT ?? 9) + sdt;
+    this.hitCamT += delta;
+    for (const rider of [this.my, this.foe]) {
+      rider.hitT += sdt;
+      rider.stunT += sdt;
+      rider.strikeT += sdt;
+      rider.cd = Math.max(0, rider.cd - sdt);
+      if (rider.koT >= 0) rider.koT += delta;
+    }
 
     this.handleKeys();
     this.updatePoses();
@@ -871,16 +1154,181 @@ export class JoustingGame {
     this.pushHud();
   }
 
+  updatePlayerMovement(dt) {
+    const rider = this.my;
+    if (rider.koT >= 0) {
+      rider.speed += (0 - rider.speed) * Math.min(1, dt * 3);
+      this.movePos(rider, dt);
+      return;
+    }
+    const preset = DIFFICULTY_PRESETS[this.difficulty];
+    const stunned = rider.stunT < this._stunDur();
+    let target = 0;
+    if (!stunned) {
+      if (this.input.isDown("up")) target = preset.maxFwd + (this.input.isDown("sprint") ? preset.boost : 0);
+      else if (this.input.isDown("down")) target = rider.speed > 0.6 ? 0 : -MAX_BACK;
+      const turn = (this.input.isDown("left") ? 1 : 0) - (this.input.isDown("right") ? 1 : 0);
+      rider.heading += turn * preset.turnRate * dt;
+    }
+    const rate = target < rider.speed ? 4.5 : 2.6; // 煞車比加速快
+    rider.speed += (target - rider.speed) * Math.min(1, dt * rate);
+    this.movePos(rider, dt);
+    rider.gallopT += dt * (Math.abs(rider.speed) / 8);
+  }
+
+  movePos(rider, dt) {
+    rider.pos.x += Math.sin(rider.heading) * rider.speed * dt;
+    rider.pos.z += Math.cos(rider.heading) * rider.speed * dt;
+    // 場邊圍欄:柔性擋住(不反彈,速度衰減)
+    const nx = clamp(rider.pos.x, -ARENA_HALF, ARENA_HALF);
+    const nz = clamp(rider.pos.z, -ARENA_HALF, ARENA_HALF);
+    if (nx !== rider.pos.x || nz !== rider.pos.z) rider.speed *= 0.5;
+    rider.pos.x = nx;
+    rider.pos.z = nz;
+  }
+
+  // 兩馬不重疊(輕推開,防穿模)
+  resolveBodyPush() {
+    const dx = this.foe.pos.x - this.my.pos.x;
+    const dz = this.foe.pos.z - this.my.pos.z;
+    const d = Math.hypot(dx, dz);
+    if (d > 0.01 && d < 1.7) {
+      const push = (1.7 - d) / 2;
+      const ux = dx / d;
+      const uz = dz / d;
+      this.my.pos.x -= ux * push;
+      this.my.pos.z -= uz * push;
+      this.foe.pos.x += ux * push;
+      this.foe.pos.z += uz * push;
+    }
+  }
+
+  // ---------- AI 騎士(npc-ai-kit 對手 AI 三式:擬人走位+換武器+出手) ----------
+  updateAi(dt) {
+    const rider = this.foe;
+    if (rider.koT >= 0) {
+      rider.speed += (0 - rider.speed) * Math.min(1, dt * 3);
+      this.movePos(rider, dt);
+      return;
+    }
+    const preset = DIFFICULTY_PRESETS[this.difficulty];
+    const brain = rider.brain;
+    const stunned = rider.stunT < this._stunDur();
+    const w = WEAPONS[rider.weaponId];
+    const dx = this.my.pos.x - rider.pos.x;
+    const dz = this.my.pos.z - rider.pos.z;
+    const dist = Math.hypot(dx, dz);
+    const toPlayer = Math.atan2(dx, dz);
+
+    // 換武器腦(依距離挑合適的;練習場也會換,增加觀賞性)
+    brain.switchT -= dt;
+    if (brain.switchT <= 0) {
+      brain.switchT = 6 + Math.random() * 5;
+      const melee = ["lance", "spear", "greatblade", "sword", "saber", "rapier"];
+      const rangedW = ["bow", "greenballs"];
+      let pick;
+      if (dist > 12) pick = Math.random() < 0.7 ? rangedW[Math.floor(Math.random() * 2)] : melee[Math.floor(Math.random() * 6)];
+      else if (dist < 7) pick = melee[Math.floor(Math.random() * 6)];
+      else pick = Math.random() < 0.35 ? rangedW[Math.floor(Math.random() * 2)] : melee[Math.floor(Math.random() * 6)];
+      if (pick !== rider.weaponId) {
+        this.setRiderWeapon(rider, pick);
+        rider.cd = Math.max(rider.cd, 0.4);
+        this.emitEvent("weapon-switch", { who: "ai", label: WEAPONS[pick].label });
+      }
+    }
+
+    // 走位腦
+    let desiredHeading = toPlayer;
+    let desiredSpeed = preset.maxFwd * preset.aiSpd;
+    if (brain.retreatT > 0) {
+      brain.retreatT -= dt;
+      desiredHeading = toPlayer + Math.PI + brain.orbitDir * 0.5;
+      desiredSpeed = preset.maxFwd * preset.aiSpd * 0.85;
+    } else if (w.ranged) {
+      if (dist < 8) {
+        desiredHeading = toPlayer + Math.PI; // 拉開距離
+        desiredSpeed = preset.maxFwd * preset.aiSpd * 0.8;
+      } else if (dist > 16) {
+        desiredSpeed = preset.maxFwd * preset.aiSpd * 0.9;
+      } else {
+        desiredHeading = toPlayer + (Math.PI / 2) * brain.orbitDir; // 繞圈保持距離
+        desiredSpeed = preset.maxFwd * preset.aiSpd * 0.45;
+      }
+    } else {
+      // 近戰:追擊,近了收速方便對準
+      desiredSpeed = dist > 8 ? preset.maxFwd * preset.aiSpd : dist > 4 ? preset.maxFwd * preset.aiSpd * 0.65 : preset.maxFwd * preset.aiSpd * 0.4;
+    }
+    // 快撞牆就先轉向場中央
+    if (Math.abs(rider.pos.x) > ARENA_HALF - 3 || Math.abs(rider.pos.z) > ARENA_HALF - 3) {
+      desiredHeading = Math.atan2(-rider.pos.x, -rider.pos.z);
+    }
+    if (stunned) desiredSpeed = 0;
+
+    const angDiff = wrapAngle(desiredHeading - rider.heading);
+    const maxTurn = preset.turnRate * preset.aiSpd * dt;
+    rider.heading += clamp(angDiff, -maxTurn, maxTurn);
+    rider.speed += (desiredSpeed * clamp(1 - Math.abs(angDiff) / Math.PI, 0.25, 1) - rider.speed) * Math.min(1, dt * 2.4);
+    this.movePos(rider, dt);
+    rider.gallopT += dt * (Math.abs(rider.speed) / 8);
+
+    // 出手腦(練習場不出手)
+    if (this.mode.passive || stunned || rider.cd > 0) return;
+    const facingOk = Math.abs(wrapAngle(toPlayer - rider.heading)) <= (w.arc || 0.6) + 0.25;
+    if (w.ranged) {
+      if (dist >= 6 && dist <= w.maxRange * 0.85 && facingOk) {
+        this.attack(rider, this.my);
+      }
+    } else if (dist <= w.reach + BODY_REACH && facingOk) {
+      this.attack(rider, this.my);
+      if (Math.random() < 0.35) {
+        brain.retreatT = 1.2 + Math.random() * 1.0;
+        brain.orbitDir = Math.random() < 0.5 ? -1 : 1;
+      }
+    }
+  }
+
+  updateProjectiles(dt) {
+    // 延遲發射佇列(雙鋼球第二顆)
+    if (this._shotQueue && this._shotQueue.length) {
+      for (const shot of this._shotQueue) shot.t -= dt;
+      const due = this._shotQueue.filter((s) => s.t <= 0);
+      this._shotQueue = this._shotQueue.filter((s) => s.t > 0);
+      for (const s of due) this._fireProjectile(s.rider, s.target, s.w);
+    }
+    for (const p of this.projectiles) {
+      p.t += dt;
+      p.vel.y -= (p.isBall ? 6.5 : 1.8) * dt;
+      p.mesh.position.addScaledVector(p.vel, dt);
+      if (!p.isBall) p.mesh.lookAt(p.mesh.position.clone().add(p.vel));
+      // 命中判定(只打對方)
+      if (!p.done && p.target.koT < 0) {
+        const chest = p.target.pos.clone().setY(1.8);
+        if (p.mesh.position.distanceTo(chest) < 1.25) {
+          p.done = true;
+          p.remove = true;
+          this.applyHit(p.target, p.dmg, { who: p.who, weapon: p.weapon, stun: p.stun });
+        }
+      }
+      if (p.mesh.position.y <= 0.05 || p.t > 3.5) p.remove = true;
+    }
+    for (const p of this.projectiles.filter((x) => x.remove)) this.scene.remove(p.mesh);
+    this.projectiles = this.projectiles.filter((x) => !x.remove);
+  }
+
   handleKeys() {
     if (this.input.consumePress("camera")) this.cycleCameraView();
     if (this.input.consumePress("pause")) this.togglePause();
     if (this.overlay.visible) return;
     if (this.input.consumePress("shoot")) this.strike();
+    if (this.input.consumePress("switch")) this.cyclePlayerWeapon();
+    for (let i = 0; i < WEAPON_ORDER.length; i += 1) {
+      if (this.input.consumePress(`weapon${i + 1}`)) this.setPlayerWeapon(WEAPON_ORDER[i]);
+    }
   }
 
   updatePoses() {
     const animateHorse = (h, gallop, sp) => {
-      const amp = clamp(sp / 14, 0, 0.62);
+      const amp = clamp(Math.abs(sp) / 14, 0, 0.62);
       const t = gallop * Math.PI * 2;
       const phases = [0, Math.PI * 0.5, Math.PI, Math.PI * 1.5];
       h.legs.forEach((leg, i) => {
@@ -891,71 +1339,87 @@ export class JoustingGame {
       h.neckPivot.rotation.x = Math.sin(t) * amp * 0.12;
       h.tail.rotation.x = 0.55 + Math.sin(t * 0.9) * 0.15;
     };
-    animateHorse(this.myHorse, this.gallopT, this.speed);
-    animateHorse(this.aiHorse, this.aiGallopT, this.aiSpeed);
-    this.myHorse.group.position.z = this.myZ;
-    this.aiHorse.group.position.z = this.aiZ;
 
-    // 我方騎士:衝鋒=槍口平舉(couch);出槍瞬間前刺;被擊中=後仰(無 KO 苦臉反應)
-    const gap = this.aiZ - this.myZ;
-    const couch = this.phase === "charging" && gap <= ARM_RANGE;
-    // 出槍前刺:0.3 秒內 -0.6 → -1.5 再回
-    let thrust = 0;
-    if (this.strikeAnimT < 0.16) thrust = this.strikeAnimT / 0.16;
-    else if (this.strikeAnimT < 0.45) thrust = 1 - (this.strikeAnimT - 0.16) / 0.29;
-    this.me.rightArm.pivot.rotation.x = couch || this.armed ? -1.5 - thrust * 0.4 : -1.05;
-    this.me.rightArm.joint.rotation.x = couch || this.armed ? -0.1 - thrust * 0.25 : -0.6;
-    this.me.leftArm.pivot.rotation.x = -0.9; // 持盾護胸
-    this.me.leftArm.pivot.rotation.z = 0.35;
-    this.me.rig.rotation.x = this.hitReactT < 0.8 ? -0.55 * (1 - this.hitReactT / 0.8) : (this.phase === "charging" ? 0.12 : 0);
-    // 槍瞄過分隔柵(couch=斜指對手)+出槍瞬間整枝前刺(07-15 bug 修:原本只轉手臂看不見)
-    this.me.rig.rotation.y = couch || this.armed ? -0.22 : 0;
-    this.myGear.lance.rotation.y = couch || this.armed ? -0.3 : 0;
-    this.myGear.lance.position.z = 0.1 + thrust * 1.0;
-    // 對手鏡像(含出槍演出)
-    const aiCouch = this.phase === "charging" && gap <= ARM_RANGE;
-    let aiThrust = 0;
-    if (this.aiStrikeAnimT < 0.16) aiThrust = this.aiStrikeAnimT / 0.16;
-    else if (this.aiStrikeAnimT < 0.45) aiThrust = 1 - (this.aiStrikeAnimT - 0.16) / 0.29;
-    this.ai.rightArm.pivot.rotation.x = aiCouch ? -1.5 - aiThrust * 0.4 : -1.05;
-    this.ai.rightArm.joint.rotation.x = aiCouch ? -0.1 - aiThrust * 0.25 : -0.6;
-    this.ai.leftArm.pivot.rotation.x = -0.9;
-    this.ai.leftArm.pivot.rotation.z = 0.35;
-    this.ai.rig.rotation.y = aiCouch ? -0.22 : 0;
-    this.aiGear.lance.rotation.y = aiCouch ? -0.3 : 0;
-    this.aiGear.lance.position.z = 0.1 + aiThrust * 1.0;
-    this.ai.rig.rotation.x = this.aiHitReactT < 0.8 ? -0.55 * (1 - this.aiHitReactT / 0.8) : (this.phase === "charging" ? 0.12 : 0);
+    for (const rider of [this.my, this.foe]) {
+      animateHorse(rider.horse, rider.gallopT, rider.speed);
+      const w = WEAPONS[rider.weaponId];
+      const person = rider.person;
+      const other = rider === this.my ? this.foe : this.my;
+      const dist = rider.pos.distanceTo(other.pos);
+      const engaged = this.phase === "battle" && dist < 14;
+
+      // 出手動畫:0.16s 前刺/揮出 → 0.29s 收回
+      let thrust = 0;
+      if (rider.strikeT < 0.16) thrust = rider.strikeT / 0.16;
+      else if (rider.strikeT < 0.45) thrust = 1 - (rider.strikeT - 0.16) / 0.29;
+
+      if (w.ranged) {
+        // 遠程:手臂抬高瞄準,出手時輕振
+        person.rightArm.pivot.rotation.x = -1.35 - thrust * 0.2;
+        person.rightArm.joint.rotation.x = -0.25;
+      } else {
+        person.rightArm.pivot.rotation.x = (engaged ? -1.35 : -1.05) - thrust * 0.5;
+        person.rightArm.joint.rotation.x = (engaged ? -0.15 : -0.6) - thrust * 0.25;
+      }
+      // 大刀/劍類:出手時上身帶一點側轉(揮砍感)
+      const swing = !w.ranged && !w.chargeBonus ? thrust * 0.5 : 0;
+      person.rig.rotation.y = -swing;
+      // 武器前送(刺擊類整枝前刺)
+      const model = rider.gear.weapons[rider.weaponId];
+      if (model) model.position.z = 0.1 + (w.chargeBonus ? thrust * 1.0 : thrust * 0.4);
+
+      person.leftArm.pivot.rotation.x = -0.9; // 持盾護胸
+      person.leftArm.pivot.rotation.z = 0.35;
+
+      // 被擊中=後仰苦臉;暈眩=左右搖晃
+      const stunned = rider.stunT < this._stunDur();
+      if (rider.koT >= 0) {
+        // 溫柔落馬:側滑下馬(演出,不受傷)
+        const k = clamp(rider.koT / 1.2, 0, 1);
+        person.group.rotation.z = k * 1.3;
+        person.group.position.y = 0.82 - k * 0.45;
+        person.group.position.x = k * 0.6;
+      } else if (stunned) {
+        person.rig.rotation.z = Math.sin(this.time * 10) * 0.12;
+        person.rig.rotation.x = 0.1;
+      } else {
+        person.rig.rotation.z = 0;
+        person.rig.rotation.x = rider.hitT < 0.8 ? -0.55 * (1 - rider.hitT / 0.8) : (Math.abs(rider.speed) > 4 ? 0.12 : 0);
+      }
+    }
   }
 
   updateCamera(delta) {
     let desiredPos;
     let desiredLook;
+    const mid = this.my.pos.clone().add(this.foe.pos).multiplyScalar(0.5);
     if (this.phase === "menu") {
       const a = this.time * 0.08;
       desiredPos = new THREE.Vector3(Math.cos(a) * 34, 11, Math.sin(a) * 34);
       desiredLook = new THREE.Vector3(0, 1.2, 0);
-    } else if ((this.phase === "charging" || this.phase === "reset") && Math.abs(this.aiZ - this.myZ) < 9) {
-      // 交錯電影鏡頭(慢動作配側面近景:兩騎+出槍+盾閃全入鏡)
-      const mid = (this.myZ + this.aiZ) / 2;
-      desiredPos = new THREE.Vector3(9.5, 2.7, mid + 1);
-      desiredLook = new THREE.Vector3(0, 1.9, mid);
+    } else if (this.hitCamT < 0.55 && this.phase === "battle") {
+      // 命中特寫:兩騎連線的側面近景(慢動作配側拍)
+      const dir = this.foe.pos.clone().sub(this.my.pos).setY(0).normalize();
+      const perp = new THREE.Vector3(-dir.z, 0, dir.x);
+      desiredPos = mid.clone().addScaledVector(perp, 7.5).setY(2.6);
+      desiredLook = mid.clone().setY(1.8);
     } else if (this.cameraView === 0) {
-      // 跟隨玩家後上方,看向對手來向
-      desiredPos = new THREE.Vector3(LANE_X + 2.4, 4.2, this.myZ - 8.5);
-      desiredLook = new THREE.Vector3(0, 1.7, this.myZ + 12);
+      // 跟隨玩家後上方(隨馬頭朝向轉)
+      const fwd = new THREE.Vector3(Math.sin(this.my.heading), 0, Math.cos(this.my.heading));
+      desiredPos = this.my.pos.clone().addScaledVector(fwd, -8.2).setY(4.2);
+      desiredLook = this.my.pos.clone().addScaledVector(fwd, 9).setY(1.6);
     } else if (this.cameraView === 1) {
-      const mid = (this.myZ + this.aiZ) / 2;
-      desiredPos = new THREE.Vector3(11, 3.4, mid);
-      desiredLook = new THREE.Vector3(0, 1.5, mid);
+      desiredPos = new THREE.Vector3(ARENA_HALF + 6, 4.2, clamp(mid.z, -18, 18));
+      desiredLook = mid.clone().setY(1.5);
     } else if (this.cameraView === 2) {
-      const mid = (this.myZ + this.aiZ) / 2;
-      desiredPos = new THREE.Vector3(4, 26, mid);
-      desiredLook = new THREE.Vector3(0, 0.5, mid);
+      desiredPos = new THREE.Vector3(mid.x, 30, mid.z + 2);
+      desiredLook = mid.clone().setY(0.5);
     } else {
-      desiredPos = new THREE.Vector3(LANE_X, 2.9, this.myZ - 0.4);
-      desiredLook = new THREE.Vector3(-LANE_X * 0.4, 1.8, this.myZ + 14);
+      const fwd = new THREE.Vector3(Math.sin(this.my.heading), 0, Math.cos(this.my.heading));
+      desiredPos = this.my.pos.clone().addScaledVector(fwd, 0.4).setY(2.9);
+      desiredLook = this.my.pos.clone().addScaledVector(fwd, 14).setY(1.8);
     }
-    const k = 1 - Math.exp(-delta * (Math.abs(this.aiZ - this.myZ) < 9 && this.phase !== "menu" ? 6.5 : 3.4));
+    const k = 1 - Math.exp(-delta * (this.hitCamT < 0.55 && this.phase !== "menu" ? 6.5 : 3.4));
     this.camPos.lerp(desiredPos, k);
     this.camLook.lerp(desiredLook, k);
     this.camera.position.copy(this.camPos);
@@ -966,33 +1430,33 @@ export class JoustingGame {
   pushHud() {
     if (!this.onHudUpdate) return;
     const preset = DIFFICULTY_PRESETS[this.difficulty];
-    const gap = this.aiZ - this.myZ;
-    // 出槍時機條:對手進 ARM_RANGE 內開始充,到理想出槍點=滿;err<window=綠區
-    let approach01 = 0;
-    let inWindow = false;
-    if (this.phase === "charging" && !this.armed && gap <= ARM_RANGE) {
-      approach01 = clamp(1 - (gap - STRIKE_IDEAL) / (ARM_RANGE - STRIKE_IDEAL), 0, 1);
-      const closing = Math.max(this.speed + this.aiSpeed, 1);
-      inWindow = Math.abs(gap - STRIKE_IDEAL) / closing <= preset.window;
-    }
-    const phaseLabels = { menu: "主選單", gate: "出發線", charging: "衝鋒", reset: "回合結算", ended: "終場" };
-    const totalPasses = this.mode.race ? "∞" : this.mode.endless ? "∞" : preset.passes;
+    const w = WEAPONS[this.my.weaponId];
+    const dist = this.my.pos.distanceTo(this.foe.pos);
+    const ready01 = w.cd > 0 ? clamp(1 - this.my.cd / w.cd, 0, 1) : 1;
+    const inReach = w.ranged
+      ? dist >= 4 && dist <= w.maxRange
+      : dist <= w.reach + BODY_REACH + preset.assist * 0.8;
+    const phaseLabels = { menu: "主選單", gate: "出戰準備", battle: "激戰中", ended: "終場" };
     this.onHudUpdate({
-      myScore: this.myScore,
-      aiScore: this.aiScore,
-      passNo: this.passNo,
-      totalPasses,
+      myHp: this.my.hp,
+      aiHp: this.foe.hp,
+      maxHp: this.mode.hp || 100,
+      roundNo: this.roundNo,
+      roundCap: this.mode.roundCap || null,
       modeLabel: this.mode.label,
       difficultyLabel: DIFFICULTY_LABELS[this.difficulty],
       phaseLabel: phaseLabels[this.phase] || "",
       message: this.message,
-      speed01: clamp(this.speed / (preset.baseSpeed + preset.boost), 0, 1),
-      speedText: `${(this.speed * 3.6).toFixed(0)} km/h`,
-      approach01,
-      inWindow,
-      armed: this.armed,
-      gapText: this.phase === "charging" ? `${Math.max(0, gap).toFixed(0)} m` : "—",
-      lastResult: this.lastResult,
+      speed01: clamp(Math.abs(this.my.speed) / (preset.maxFwd + preset.boost), 0, 1),
+      speedText: `${(this.my.speed * 3.6).toFixed(0)} km/h`,
+      weaponLabel: w.label,
+      weaponShort: w.short,
+      weaponHint: w.hint,
+      weaponReady01: ready01,
+      weaponReady: this.my.cd <= 0,
+      inReach,
+      gapText: this.phase === "battle" ? `${dist.toFixed(1)} m` : "—",
+      lastHit: this.lastHit,
       overlay: { ...this.overlay },
     });
   }
@@ -1000,10 +1464,13 @@ export class JoustingGame {
   // ---------- 存讀檔(勝場紀錄) ----------
   saveGame(silent = false) {
     const prev = loadSavedGame() || {};
-    const snapshot = { difficulty: this.difficulty, modeId: this.modeId, horseCoat: this.coatId, wins: prev.wins || 0, matches: prev.matches || 0 };
-    if (this.phase === "ended" && !this.mode.endless) {
+    const snapshot = {
+      difficulty: this.difficulty, modeId: this.modeId, horseCoat: this.coatId, weaponId: this.weaponId,
+      wins: prev.wins || 0, matches: prev.matches || 0,
+    };
+    if (this.phase === "ended" && !this.mode.passive) {
       snapshot.matches = (prev.matches || 0) + 1;
-      if (this.myScore > this.aiScore) snapshot.wins = (prev.wins || 0) + 1;
+      if (this.foe.hp <= 0 && this.my.hp > 0) snapshot.wins = (prev.wins || 0) + 1;
     }
     saveGameState(snapshot);
     if (!silent) {
@@ -1021,6 +1488,10 @@ export class JoustingGame {
       this.mode = getModeConfig(snap.modeId);
     }
     if (HORSE_COATS[snap.horseCoat]) this.setHorseCoat(snap.horseCoat);
+    if (WEAPONS[snap.weaponId]) {
+      this.weaponId = snap.weaponId;
+      this.setRiderWeapon(this.my, snap.weaponId);
+    }
     this.openHomeMenu();
     this.message = snap.matches
       ? `戰績:${snap.wins} 勝 / ${snap.matches} 場——繼續衝!`
