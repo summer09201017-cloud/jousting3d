@@ -13,12 +13,14 @@ import { loadSettings, saveSettings, loadSavedGame, saveGameState } from "./stor
 // maxFwd=馬最高前速;turnRate=轉向速率;aiSkill=AI 出手命中率;aiCd=AI 冷卻倍率;
 // aiDmg=AI 傷害倍率;aiSpd=AI 馬速倍率;assist=兒童輔助(加傷害+放寬命中幾何)
 // boost=衝刺加速(玩家限定,AI 沒有——按住 Shift/衝刺鈕逃跑用,07-16 使用者點名要跑更快)
+// 07-16 再調弱 AI(使用者回饋:太黏拉不開):aiSpd 全檔下修——入門以下用走的就能拉開,
+// AI 的反制是換遠程武器;aiCd 低檔位也放慢(出手更稀)。
 export const DIFFICULTY_PRESETS = {
-  kids: { maxFwd: 6.5, boost: 4.5, turnRate: 2.1, aiSkill: 0.25, aiCd: 1.9, aiDmg: 0.45, aiSpd: 0.75, assist: 0.5 },
-  child: { maxFwd: 7.5, boost: 5.2, turnRate: 2.05, aiSkill: 0.4, aiCd: 1.5, aiDmg: 0.65, aiSpd: 0.85, assist: 0.3 },
-  easy: { maxFwd: 8.5, boost: 6.0, turnRate: 1.95, aiSkill: 0.55, aiCd: 1.25, aiDmg: 0.8, aiSpd: 0.92, assist: 0.15 },
-  normal: { maxFwd: 9.5, boost: 7.0, turnRate: 1.85, aiSkill: 0.68, aiCd: 1.05, aiDmg: 0.95, aiSpd: 1.0, assist: 0 },
-  hard: { maxFwd: 10.5, boost: 7.5, turnRate: 1.8, aiSkill: 0.82, aiCd: 0.85, aiDmg: 1.1, aiSpd: 1.06, assist: 0 },
+  kids: { maxFwd: 6.5, boost: 4.5, turnRate: 2.1, aiSkill: 0.25, aiCd: 2.3, aiDmg: 0.45, aiSpd: 0.5, assist: 0.5 },
+  child: { maxFwd: 7.5, boost: 5.2, turnRate: 2.05, aiSkill: 0.4, aiCd: 1.9, aiDmg: 0.65, aiSpd: 0.58, assist: 0.3 },
+  easy: { maxFwd: 8.5, boost: 6.0, turnRate: 1.95, aiSkill: 0.55, aiCd: 1.55, aiDmg: 0.8, aiSpd: 0.68, assist: 0.15 },
+  normal: { maxFwd: 9.5, boost: 7.0, turnRate: 1.85, aiSkill: 0.68, aiCd: 1.2, aiDmg: 0.95, aiSpd: 0.82, assist: 0 },
+  hard: { maxFwd: 10.5, boost: 7.5, turnRate: 1.8, aiSkill: 0.82, aiCd: 0.95, aiDmg: 1.1, aiSpd: 0.95, assist: 0 },
 };
 
 export const DIFFICULTY_LABELS = {
@@ -1660,18 +1662,16 @@ export class JoustingGame {
       if (rider.blocking) target *= 0.35; // 舉盾中龜速推進
       const turn = (this.input.isDown("left") ? 1 : 0) - (this.input.isDown("right") ? 1 : 0);
       rider.heading += turn * preset.turnRate * dt;
-      // 自動面向敵人:近距離自動轉身對準;手動轉向(A/D)或衝刺逃跑時不干預;
-      // 高速背對(騎馬離開)也不硬拉回來,只有慢下來纏鬥時才鎖定
-      if (turn === 0 && !this.input.isDown("sprint") && this.foe.koT < 0) {
+      // 自動面向敵人(07-16 三修:按住前進=完全讓位,不然走不掉會被拉回去):
+      // 只有「站定/後退/沒按方向」的纏鬥時刻才鎖定對手;A/D、衝刺、W 前進都不干預
+      if (turn === 0 && !this.input.isDown("sprint") && !this.input.isDown("up") && this.foe.koT < 0) {
         const dxF = this.foe.pos.x - rider.pos.x;
         const dzF = this.foe.pos.z - rider.pos.z;
         const distF = Math.hypot(dxF, dzF);
         if (distF <= AUTO_FACE_RANGE) {
           const diff = wrapAngle(Math.atan2(dxF, dzF) - rider.heading);
-          if (Math.abs(diff) <= 2.0 || Math.abs(rider.speed) < preset.maxFwd * 0.45) {
-            const maxTurn = preset.turnRate * 1.15 * dt;
-            rider.heading += clamp(diff, -maxTurn, maxTurn);
-          }
+          const maxTurn = preset.turnRate * 1.15 * dt;
+          rider.heading += clamp(diff, -maxTurn, maxTurn);
         }
       }
     }
@@ -1789,6 +1789,20 @@ export class JoustingGame {
     }
     if (rider.blocking) desiredSpeed *= 0.35;
     if (rider.chargeT >= 0) desiredSpeed *= 0.25; // AI 蓄力時明顯減速=玩家的閃避/打斷窗
+
+    // 喘息腦(入門以下,07-16 使用者回饋 AI 太黏):每 4~8 秒停下喘 1.4 秒
+    // =孩子的逃跑窗/反打窗;職業與標準沒有喘息
+    if (preset.aiSkill < 0.6) {
+      brain.breatherT = (brain.breatherT ?? 4) - dt;
+      if (brain.breatherT <= 0) {
+        brain.restT = 1.4;
+        brain.breatherT = 4 + Math.random() * 4;
+      }
+      if (brain.restT > 0) {
+        brain.restT -= dt;
+        desiredSpeed *= 0.15;
+      }
+    }
 
     const angDiff = wrapAngle(desiredHeading - rider.heading);
     const maxTurn = preset.turnRate * preset.aiSpd * dt;
@@ -1927,6 +1941,7 @@ export class JoustingGame {
       let rigY = 0; // 上身水平旋轉(微跟用)
       let strikeLean = 0; // 上身前壓(力道感)
       let weaponZ = 0.1;
+      let weaponRotX = 0; // 武器貼臂角(橫掃時刀轉 90° 貼齊前臂,刀身才平躺水平面)
       if (w.ranged) {
         armX = -1.35;
         armJ = -0.25;
@@ -1952,6 +1967,7 @@ export class JoustingGame {
           // 再「只有持刀手臂」繞垂直軸在水平面掃一整圈,上身只微跟(重量感)
           armX = -1.5; // 手臂下壓 90°,大刀放平
           armJ = 0;
+          weaponRotX = Math.PI / 2; // 刀貼臂(武器原與前臂垂直,放平時會立起——轉 90° 躺平)
           if (st < 0.12) { // 起手反擰
             armY = (st / 0.12) * 0.5;
             strikeLean = 0.08;
@@ -2004,7 +2020,10 @@ export class JoustingGame {
       person.rightArm.pivot.rotation.y = armY;
       person.rightArm.joint.rotation.x = armJ;
       person.rig.rotation.y = rigY;
-      if (model) model.position.z = weaponZ;
+      if (model) {
+        model.position.z = weaponZ;
+        model.rotation.x = weaponRotX;
+      }
 
       // 左臂盾:平時護胸;舉盾格擋=盾舉到身前正中(看得見「真的舉起來」)
       if (rider.blocking) {
