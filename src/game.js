@@ -93,6 +93,12 @@ const TECH_CD = 3.5;
 const LEAP_RANGE = [8, 16]; // 跳殺距離帶
 const DASH_RANGE = [3, 8]; // 飛殺距離帶
 
+// 格擋(07-16 使用者點名):按住 K/C/舉盾鈕=舉盾——只擋正面 ±60°(BLOCK_ARC),
+// 擋箭/鋼球=無傷;擋近戰=傷害×0.3;擋大招波動=傷害×0.3;舉盾瞬間 ≤PARRY_WINDOW 秒
+// 內被近戰打到=完美盾反(無傷+對手彈開硬直)。舉盾中移速大減、不能出招。AI 也會舉盾。
+const BLOCK_ARC = 1.05;
+const PARRY_WINDOW = 0.35;
+
 // ---------- 競技場常數 ----------
 const ARENA_HALF = 25; // 可騎乘範圍(±m)
 const BODY_REACH = 1.1; // 馬身+臂展的基礎出手距離
@@ -254,7 +260,100 @@ function makePerson({ shirt = 0x2f6f4e, pants = 0x2a3550, skin = 0xf3cca6, hair 
   const rightLeg = mkLeg(0.15);
 
   group.scale.setScalar(scale);
-  return { group, rig, head, waist, leftArm, rightArm, leftLeg, rightLeg };
+  return { group, rig, head, waist, leftArm, rightArm, leftLeg, rightLeg, smile };
+}
+
+// ---------- 可選角色(07-16 使用者點名,SBR 致敬皮,移植自 equestrian3d) ----------
+// 選傑洛/喬尼時,對手自動變成「另一位」(兩人本來就是搭檔);預設=紅騎士 vs 藍騎士。
+export const CHARACTERS = {
+  default: { label: "紅騎士(預設)" },
+  gyro: { label: "傑洛·齊貝林", shirt: 0x7a4db8, pants: 0x4a3a2e, hair: 0xe6c95c },
+  johnny: { label: "喬尼·喬斯達", shirt: 0xf2f0ec, pants: 0xf2f0ec, hair: 0xe6c95c },
+};
+
+function makeStar(radius, color) {
+  const shape = new THREE.Shape();
+  for (let i = 0; i < 10; i += 1) {
+    const a = (i / 10) * Math.PI * 2 - Math.PI / 2;
+    const r = i % 2 === 0 ? radius : radius * 0.45;
+    const x = Math.cos(a) * r;
+    const y = Math.sin(a) * r;
+    if (i === 0) shape.moveTo(x, y);
+    else shape.lineTo(x, y);
+  }
+  shape.closePath();
+  return new THREE.Mesh(new THREE.ShapeGeometry(shape), new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide }));
+}
+
+// 角色造型(掛在 makePerson 的 rig 上;帽簷停在眉上、鬍壓下顎線、星要突出帽面——07-15 三雷)
+function makeCharacterPerson(charId, scale) {
+  const spec = CHARACTERS[charId];
+  const person = makePerson({ shirt: spec.shirt, pants: spec.pants, hair: spec.hair, gender: "f", scale });
+  const hairSideMat = new THREE.MeshStandardMaterial({ color: spec.hair, roughness: 0.85 });
+  for (const x of [-0.21, 0.21]) {
+    const lock = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.32, 0.14), hairSideMat);
+    lock.position.set(x, 1.97, -0.03);
+    person.rig.add(lock);
+  }
+  if (charId === "johnny") {
+    // 白色毛帽+帽上藍星+正面金馬蹄鐵+胸前藍星
+    const capMat = new THREE.MeshStandardMaterial({ color: 0xf2f0ec, roughness: 0.7 });
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.268, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), capMat);
+    cap.position.y = 2.2;
+    person.rig.add(cap);
+    const horseshoe = new THREE.Mesh(new THREE.TorusGeometry(0.055, 0.016, 6, 12, Math.PI), new THREE.MeshBasicMaterial({ color: 0xd8a83c }));
+    horseshoe.position.set(0, 2.24, 0.28);
+    horseshoe.rotation.x = -0.15;
+    person.rig.add(horseshoe);
+    for (const a of [-1.1, -0.55, 0.55, 1.1, Math.PI]) {
+      const s = makeStar(0.05, 0x2f4fa8);
+      const r = 0.28;
+      s.position.set(Math.sin(a) * r, 2.24, Math.cos(a) * r);
+      s.rotation.order = "YXZ";
+      s.rotation.y = a;
+      s.rotation.x = -0.15;
+      person.rig.add(s);
+    }
+    const chestStar = makeStar(0.1, 0x2f4fa8);
+    chestStar.position.set(0, 1.54, 0.171);
+    person.rig.add(chestStar);
+  } else {
+    // 傑洛:棕寬簷帽+深帽帶+下顎環鬍+金牙笑(原生嘴關掉,不然變雙嘴)+兩片綠披風
+    person.smile.visible = false;
+    const hatMat = new THREE.MeshStandardMaterial({ color: 0x6b4526, roughness: 0.75 });
+    const bandMat = new THREE.MeshStandardMaterial({ color: 0x3e2a18, roughness: 0.6 });
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.37, 0.37, 0.03, 18), hatMat);
+    brim.position.y = 2.26;
+    person.rig.add(brim);
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.218, 0.218, 0.07, 14), bandMat);
+    band.position.y = 2.3;
+    person.rig.add(band);
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.215, 0.22, 14), hatMat);
+    crown.position.y = 2.4;
+    person.rig.add(crown);
+    const beard = new THREE.Mesh(new THREE.TorusGeometry(0.195, 0.028, 6, 14, Math.PI), new THREE.MeshStandardMaterial({ color: 0x3a2a16, roughness: 0.9 }));
+    beard.position.set(0, 1.95, 0);
+    beard.rotation.x = Math.PI / 2;
+    person.rig.add(beard);
+    const grill = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.022, 8, 14, Math.PI), new THREE.MeshBasicMaterial({ color: 0xd8a83c }));
+    grill.position.set(0, 2.045, 0.218);
+    grill.rotation.z = Math.PI;
+    person.rig.add(grill);
+    // 兩片大綠披風(依速度揚起飄動,updatePoses 處理)
+    const capeMat = new THREE.MeshStandardMaterial({ color: 0x3f8f5a, roughness: 0.8, side: THREE.DoubleSide });
+    person.capes = [];
+    for (const x of [-0.21, 0.21]) {
+      const pivot = new THREE.Group();
+      pivot.position.set(x, 1.8, -0.17);
+      const cape = new THREE.Mesh(new THREE.BoxGeometry(0.34, 1.0, 0.03), capeMat);
+      cape.position.y = -0.5;
+      pivot.add(cape);
+      pivot.rotation.x = 0.3;
+      person.rig.add(pivot);
+      person.capes.push(pivot);
+    }
+  }
+  return person;
 }
 
 // ---------- 馬(長腿 v3+鬃毛三件套;coatMat/maneMat 可換色) ----------
@@ -378,22 +477,25 @@ function makeHorse({ coat = 0x8a5a33, mane = 0x3a2a1c, caparison = null } = {}) 
 }
 
 // ---------- 騎士裝備:頭盔+羽飾+盾+八般武器(全部鈍頭/包棉演出,掛右手,切換顯示) ----------
-function knightUp(person, teamColor, plumeColor) {
+// withHelm=false 給角色皮用(傑洛/喬尼戴自己的帽子,不戴全罩盔)
+function knightUp(person, teamColor, plumeColor, withHelm = true) {
   const teamMat = new THREE.MeshStandardMaterial({ color: teamColor, roughness: 0.6 });
   const steelMat = new THREE.MeshStandardMaterial({ color: 0xb9c0c8, metalness: 0.65, roughness: 0.35 });
   const woodMat = new THREE.MeshStandardMaterial({ color: 0xd9c9a8, roughness: 0.7 });
   const darkWoodMat = new THREE.MeshStandardMaterial({ color: 0x6d4a26, roughness: 0.7 });
-  // 全罩盔(蓋住頭髮)+隊色羽飾
-  const helm = new THREE.Mesh(new THREE.SphereGeometry(0.29, 16, 12), steelMat);
-  helm.position.y = 2.12;
-  person.rig.add(helm);
-  const visor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.12), new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.4 }));
-  visor.position.set(0, 2.12, 0.24);
-  person.rig.add(visor);
-  const plume = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.34, 0.16), new THREE.MeshStandardMaterial({ color: plumeColor, roughness: 0.9 }));
-  plume.position.set(0, 2.48, -0.05);
-  plume.rotation.x = -0.3;
-  person.rig.add(plume);
+  if (withHelm) {
+    // 全罩盔(蓋住頭髮)+隊色羽飾
+    const helm = new THREE.Mesh(new THREE.SphereGeometry(0.29, 16, 12), steelMat);
+    helm.position.y = 2.12;
+    person.rig.add(helm);
+    const visor = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.1, 0.12), new THREE.MeshStandardMaterial({ color: 0x2a2e33, roughness: 0.4 }));
+    visor.position.set(0, 2.12, 0.24);
+    person.rig.add(visor);
+    const plume = new THREE.Mesh(new THREE.BoxGeometry(0.07, 0.34, 0.16), new THREE.MeshStandardMaterial({ color: plumeColor, roughness: 0.9 }));
+    plume.position.set(0, 2.48, -0.05);
+    plume.rotation.x = -0.3;
+    person.rig.add(plume);
+  }
   // 胸甲(隊色罩袍上的鋼片)
   const breast = new THREE.Mesh(new THREE.BoxGeometry(0.58, 0.5, 0.1), steelMat);
   breast.position.set(0, 1.5, 0.19);
@@ -577,6 +679,7 @@ export class JoustingGame {
     this.mode = getModeConfig(this.modeId);
     this.coatId = HORSE_COATS[settings.horseCoat] ? settings.horseCoat : "brown";
     this.weaponId = WEAPONS[settings.weaponId] ? settings.weaponId : "lance";
+    this.characterId = CHARACTERS[settings.character] ? settings.character : "default";
 
     this.input = new InputManager();
     this.input.bindTouchButtons(this.touchRoot);
@@ -730,20 +833,8 @@ export class JoustingGame {
     }
     this.scene.add(this.crowd);
 
-    // 我方:紅騎士;對手:藍騎士
-    const coat = HORSE_COATS[this.coatId] || HORSE_COATS.brown;
-    this.my = this.makeRider({
-      coat: coat.coat, mane: coat.mane, caparison: 0xb03030,
-      shirt: 0xb03030, pants: 0x5a2a2a, team: 0xb03030, plume: 0xf6d743,
-    });
-    this.foe = this.makeRider({
-      coat: 0x4a4a52, mane: 0x1c1c22, caparison: 0x2f5f9a,
-      shirt: 0x2f5f9a, pants: 0x24304a, team: 0x2f5f9a, plume: 0xf5f0e0,
-    });
-    this.foe.brain = { retreatT: 0, switchT: 5, orbitDir: 1 };
-
-    this.setRiderWeapon(this.my, this.weaponId);
-    this.setRiderWeapon(this.foe, "lance");
+    // 我方:紅騎士(角色可選:傑洛/喬尼);對手:藍騎士(選角時自動變另一位)
+    this._buildRiders();
 
     // 擊中閃光(被擊者身上亮一圈)
     this.hitFlash = new THREE.Mesh(
@@ -756,17 +847,49 @@ export class JoustingGame {
     this.resetRiders();
   }
 
-  makeRider({ coat, mane, caparison, shirt, pants, team, plume }) {
+  // 建(或重建)兩位騎士——選角色時整組重蓋(選單階段呼叫,不在戰鬥中換)
+  _buildRiders() {
+    const brain = this.foe ? this.foe.brain : { retreatT: 0, switchT: 5, orbitDir: 1 };
+    if (this.my) this.scene.remove(this.my.horse.group);
+    if (this.foe) this.scene.remove(this.foe.horse.group);
+    const coat = HORSE_COATS[this.coatId] || HORSE_COATS.brown;
+    const pc = this.characterId === "default" ? null : this.characterId;
+    const foeChar = pc === "gyro" ? "johnny" : pc === "johnny" ? "gyro" : null;
+    this.my = this.makeRider({
+      coat: coat.coat, mane: coat.mane, caparison: 0xb03030,
+      shirt: 0xb03030, pants: 0x5a2a2a, team: 0xb03030, plume: 0xf6d743,
+      character: pc,
+    });
+    this.foe = this.makeRider({
+      coat: 0x4a4a52, mane: 0x1c1c22, caparison: 0x2f5f9a,
+      shirt: 0x2f5f9a, pants: 0x24304a, team: 0x2f5f9a, plume: 0xf5f0e0,
+      character: foeChar,
+    });
+    this.foe.brain = brain;
+    this.setRiderWeapon(this.my, this.weaponId);
+    this.setRiderWeapon(this.foe, "lance");
+  }
+
+  setCharacter(charId) {
+    if (!CHARACTERS[charId] || charId === this.characterId) return;
+    this.characterId = charId;
+    this._buildRiders();
+    this.resetRiders();
+  }
+
+  makeRider({ coat, mane, caparison, shirt, pants, team, plume, character = null }) {
     const horse = makeHorse({ coat, mane, caparison });
     this.scene.add(horse.group);
-    const person = makePerson({ shirt, pants, scale: 0.95 });
+    const person = character
+      ? makeCharacterPerson(character, 0.95)
+      : makePerson({ shirt, pants, scale: 0.95 });
     person.leftLeg.pivot.rotation.x = -1.25;
     person.leftLeg.pivot.rotation.z = 0.5;
     person.leftLeg.joint.rotation.x = 1.5;
     person.rightLeg.pivot.rotation.x = -1.25;
     person.rightLeg.pivot.rotation.z = -0.5;
     person.rightLeg.joint.rotation.x = 1.5;
-    const gear = knightUp(person, team, plume);
+    const gear = knightUp(person, team, plume, !character); // 角色皮戴自己的帽,不戴全罩盔
     person.group.position.set(0, 0.82, 0.12);
     person.group.scale.setScalar(0.95);
     horse.rig.add(person.group);
@@ -783,6 +906,7 @@ export class JoustingGame {
       pos: new THREE.Vector3(), heading: 0, speed: 0,
       hp: 100, weaponId: "lance", cd: 0, chargeT: -1,
       sprintT: 0, techCd: 0, leap: null, dash: null, airY: 0,
+      blocking: false, blockT: 9,
       strikeT: 9, hitT: 9, stunT: 9, koT: -1, gallopT: 0,
     };
   }
@@ -805,6 +929,8 @@ export class JoustingGame {
       rider.leap = null;
       rider.dash = null;
       rider.airY = 0;
+      rider.blocking = false;
+      rider.blockT = 9;
       rider.person.group.rotation.z = 0;
       rider.person.group.position.set(0, 0.82, 0.12);
     }
@@ -824,6 +950,7 @@ export class JoustingGame {
       this.foe.brain.orbitDir = Math.random() < 0.5 ? -1 : 1;
       this.foe.brain.superT = 8 + Math.random() * 6; // AI 大招節拍
       this.foe.brain.superHold = 0;
+      this.foe.brain.blockHold = 0;
     }
     this.syncRiderTransforms();
     // 鏡頭硬切到玩家後方(lerp 穿場鐵則)
@@ -853,7 +980,7 @@ export class JoustingGame {
     this.setRiderWeapon(this.my, weaponId);
     this.weaponId = weaponId;
     if (this.phase === "battle") this.my.cd = Math.max(this.my.cd, 0.35);
-    saveSettings({ difficulty: this.difficulty, modeId: this.modeId, horseCoat: this.coatId, weaponId });
+    saveSettings({ difficulty: this.difficulty, modeId: this.modeId, horseCoat: this.coatId, weaponId, character: this.characterId });
     if (announce) {
       this.message = `換上${WEAPONS[weaponId].label}——${WEAPONS[weaponId].hint}!`;
       this.emitEvent("weapon-switch", { who: "me", label: WEAPONS[weaponId].label });
@@ -895,7 +1022,7 @@ export class JoustingGame {
       return;
     }
     if (this.phase !== "battle" || this.my.koT >= 0 || this.endT >= 0) return;
-    if (this.my.leap || this.my.dash) return;
+    if (this.my.leap || this.my.dash || this.my.blocking) return;
     if (this.my.cd > 0 || this.my.stunT < this._stunDur()) return;
     // 衝刺一小段後按出手=突進技:遠=跳殺、近=飛殺
     if (this.my.sprintT >= SPRINT_ARM && this.my.techCd <= 0 && this.foe.koT < 0) {
@@ -954,7 +1081,7 @@ export class JoustingGame {
       this._pendingStrikes.push({
         target,
         dmg: Math.round(dmg),
-        opts: { who: "me", weapon: { label: `${w.label}跳殺`, short: "跳殺" }, stun: 0 },
+        opts: { who: "me", weapon: { label: `${w.label}跳殺`, short: "跳殺" }, stun: 0, attacker: rider, kind: "melee" },
         t: 0.12,
       });
     } else {
@@ -991,7 +1118,7 @@ export class JoustingGame {
       this._pendingStrikes.push({
         target,
         dmg: Math.round(dmg),
-        opts: { who: "me", weapon: { label: `${w.label}飛殺`, short: "飛殺" }, stun: 0 },
+        opts: { who: "me", weapon: { label: `${w.label}飛殺`, short: "飛殺" }, stun: 0, attacker: rider, kind: "melee" },
         t: 0.1,
       });
     } else {
@@ -1015,18 +1142,19 @@ export class JoustingGame {
   }
 
   // ---------- 局面控制 ----------
-  applyPresentation({ difficulty, modeId, horseCoat, weaponId }) {
+  applyPresentation({ difficulty, modeId, horseCoat, weaponId, character }) {
     if (difficulty && DIFFICULTY_PRESETS[difficulty]) this.difficulty = difficulty;
     if (modeId && GAME_MODES[modeId]) {
       this.modeId = modeId;
       this.mode = getModeConfig(modeId);
     }
     if (horseCoat && HORSE_COATS[horseCoat]) this.setHorseCoat(horseCoat);
+    if (character && CHARACTERS[character]) this.setCharacter(character);
     if (weaponId && WEAPONS[weaponId]) {
       this.weaponId = weaponId;
       this.setRiderWeapon(this.my, weaponId);
     }
-    saveSettings({ difficulty: this.difficulty, modeId: this.modeId, horseCoat: this.coatId, weaponId: this.weaponId });
+    saveSettings({ difficulty: this.difficulty, modeId: this.modeId, horseCoat: this.coatId, weaponId: this.weaponId, character: this.characterId });
     this.message = `${this.mode.label} · ${DIFFICULTY_LABELS[this.difficulty]} · ${WEAPONS[this.weaponId].label} 已設定。`;
     this.pushHud();
   }
@@ -1106,7 +1234,7 @@ export class JoustingGame {
       this._pendingStrikes.push({
         target,
         dmg: Math.round(dmg),
-        opts: { who: isPlayer ? "me" : "ai", weapon: w, stun: 0 },
+        opts: { who: isPlayer ? "me" : "ai", weapon: w, stun: 0, attacker: rider, kind: "melee" },
         t: CONTACT_AT[w.swing] || 0.2,
       });
     } else {
@@ -1236,8 +1364,58 @@ export class JoustingGame {
     });
   }
 
-  applyHit(target, dmg, { who, weapon, stun }) {
+  // 格擋判定:舉盾中且攻擊來源在正面 ±BLOCK_ARC 內;近戰且剛舉盾 ≤PARRY_WINDOW=完美盾反
+  _blockCheck(target, src, kind) {
+    if (!target.blocking || !src) return null;
+    const ang = Math.abs(wrapAngle(Math.atan2(src.x - target.pos.x, src.z - target.pos.z) - target.heading));
+    if (ang > BLOCK_ARC) return null;
+    if (kind === "melee" && target.blockT <= PARRY_WINDOW) return "parry";
+    return "block";
+  }
+
+  applyHit(target, dmg, { who, weapon, stun, attacker, from, kind }) {
     if (this.phase !== "battle" || target.koT >= 0 || this.endT >= 0) return;
+    const src = from || (attacker ? attacker.pos : null);
+    const block = this._blockCheck(target, src, kind);
+    if (block) {
+      // 盾擊閃光(白)
+      this.hitFlash.position.copy(target.pos).setY(1.9);
+      this.hitFlash.material.color.setHex(0xffffff);
+      this.hitFlashT = 0;
+      if (block === "parry") {
+        // 完美盾反:無傷+攻擊者被彈開硬直
+        this.hitCamT = 0;
+        if (attacker) {
+          attacker.stunT = 0;
+          attacker.cd = Math.max(attacker.cd, 1.2);
+          attacker.speed *= -0.25;
+          attacker.chargeT = -1;
+        }
+        this.emitEvent("parry", { who: target === this.my ? "me" : "ai" });
+        this.message = target === this.my ? "完美盾反!對手被彈開!" : "被對手盾反彈開——小心他的節奏!";
+        this.pushHud();
+        return;
+      }
+      // 一般格擋:箭/鋼球=無傷;近戰/大招波動=傷害×0.3(輕傷不後仰、不斷蓄力)
+      const reduced = kind === "proj" ? 0 : Math.round(dmg * 0.3);
+      this.emitEvent("block", { who: target === this.my ? "me" : "ai" });
+      if (reduced <= 0) {
+        this.message = target === this.my ? "舉盾格擋——擋下來了!" : "被對手舉盾擋下——繞到側面打!";
+        this.pushHud();
+        return;
+      }
+      target.hp = Math.max(0, target.hp - reduced);
+      this.lastHit = { who, dmg: reduced, weapon: weapon.short };
+      this.emitEvent("hit", { who, dmg: reduced, weapon: weapon.label, stun: false, myHp: this.my.hp, aiHp: this.foe.hp, round: this.roundNo });
+      this.message = target === this.my ? `舉盾擋下大半——只受 -${reduced}` : `對手舉盾擋下大半——只造成 -${reduced}`;
+      if (target.hp <= 0) {
+        target.koT = 0;
+        this.endT = 0;
+        this.emitEvent("ko", { winner: who === "me" ? "me" : "ai" });
+      }
+      this.pushHud();
+      return;
+    }
     target.hp = Math.max(0, target.hp - dmg);
     target.hitT = 0;
     if (stun) target.stunT = 0;
@@ -1429,6 +1607,12 @@ export class JoustingGame {
       return;
     }
     const stunned = rider.stunT < this._stunDur();
+    // 舉盾格擋(按住 K/C/舉盾鈕):慢速移動、不能出招;剛舉盾的瞬間=盾反窗
+    const wantBlock = this.input.isDown("action") && !stunned && rider.chargeT < 0;
+    if (wantBlock && !rider.blocking) rider.blockT = 0;
+    else if (rider.blocking && wantBlock) rider.blockT += dt;
+    rider.blocking = wantBlock;
+    if (!rider.blocking) rider.blockT = 9;
     // 衝刺累計(突進技的啟動條件)
     const sprinting = this.input.isDown("up") && this.input.isDown("sprint") && !stunned;
     rider.sprintT = sprinting && Math.abs(rider.speed) > preset.maxFwd * 0.8 ? rider.sprintT + dt : 0;
@@ -1437,6 +1621,7 @@ export class JoustingGame {
       if (this.input.isDown("up")) target = preset.maxFwd + (this.input.isDown("sprint") ? preset.boost : 0);
       else if (this.input.isDown("down")) target = rider.speed > 0.6 ? 0 : -MAX_BACK;
       if (rider.chargeT >= 0) target *= 0.5; // 蓄力中放慢(大招有重量感)
+      if (rider.blocking) target *= 0.35; // 舉盾中龜速推進
       const turn = (this.input.isDown("left") ? 1 : 0) - (this.input.isDown("right") ? 1 : 0);
       rider.heading += turn * preset.turnRate * dt;
       // 自動面向敵人:近距離自動轉身對準;手動轉向(A/D)或衝刺逃跑時不干預;
@@ -1549,6 +1734,24 @@ export class JoustingGame {
     }
     if (stunned) desiredSpeed = 0;
 
+    // 舉盾腦:玩家蓄大招/放突進技或近身纏鬥時,依 aiSkill 機率舉盾一小段
+    if (rider.blocking) {
+      brain.blockHold -= dt;
+      rider.blockT += dt;
+      if (brain.blockHold <= 0 || stunned) {
+        rider.blocking = false;
+        rider.blockT = 9;
+      }
+    } else if (!stunned && rider.chargeT < 0) {
+      const threat = (this.my.chargeT >= CHARGE_MIN * 0.7 && dist < 16) || this.my.dash || this.my.leap;
+      const skirmish = dist < 5 && rider.cd > 0.35;
+      if ((threat && Math.random() < preset.aiSkill * dt * 7) || (skirmish && Math.random() < preset.aiSkill * dt * 2.5)) {
+        rider.blocking = true;
+        rider.blockT = 0;
+        brain.blockHold = 0.6 + Math.random() * 0.8;
+      }
+    }
+    if (rider.blocking) desiredSpeed *= 0.35;
     if (rider.chargeT >= 0) desiredSpeed *= 0.25; // AI 蓄力時明顯減速=玩家的閃避/打斷窗
 
     const angDiff = wrapAngle(desiredHeading - rider.heading);
@@ -1568,6 +1771,7 @@ export class JoustingGame {
       }
       return; // 蓄力中不做普攻
     }
+    if (rider.blocking) return; // 舉盾中不出招
     if (!this.mode.passive && !stunned && rider.cd <= 0 && brain.superT <= 0 && dist >= 5 && dist <= 18) {
       brain.superT = 9 + Math.random() * 7;
       brain.superHold = CHARGE_MIN + 0.35 + Math.random() * 0.5;
@@ -1629,7 +1833,10 @@ export class JoustingGame {
         if (p.mesh.position.distanceTo(chest) < (p.hitR || 1.25)) {
           p.done = true;
           p.remove = true;
-          this.applyHit(p.target, p.dmg, { who: p.who, weapon: p.weapon, stun: p.stun });
+          this.applyHit(p.target, p.dmg, {
+            who: p.who, weapon: p.weapon, stun: p.stun,
+            from: p.mesh.position, kind: p.isWave ? "wave" : "proj",
+          });
         }
       }
       if (p.isWave ? p.t > p.life : (p.mesh.position.y <= 0.05 || p.t > 3.5)) p.remove = true;
@@ -1732,6 +1939,11 @@ export class JoustingGame {
           }
         }
       }
+      // 傑洛披風:依馬速揚起+微飄
+      if (person.capes) {
+        const lift = 0.3 + clamp(Math.abs(rider.speed) / 12, 0, 1) * 0.9 + Math.sin(this.time * 6) * 0.08;
+        for (const cape of person.capes) cape.rotation.x = lift;
+      }
       // 蓄力演出:武器高舉發抖+腳下金圈亮起放大(蓄越滿越亮)
       if (rider.chargeT >= 0) {
         const c01 = clamp(rider.chargeT / CHARGE_FULL, 0, 1);
@@ -1749,8 +1961,16 @@ export class JoustingGame {
       person.rig.rotation.y = rigY;
       if (model) model.position.z = weaponZ;
 
-      person.leftArm.pivot.rotation.x = -0.9; // 持盾護胸
-      person.leftArm.pivot.rotation.z = 0.35;
+      // 左臂盾:平時護胸;舉盾格擋=盾舉到身前正中(看得見「真的舉起來」)
+      if (rider.blocking) {
+        person.leftArm.pivot.rotation.x = -1.55;
+        person.leftArm.pivot.rotation.z = -0.25;
+        person.leftArm.joint.rotation.x = -0.35;
+      } else {
+        person.leftArm.pivot.rotation.x = -0.9; // 持盾護胸
+        person.leftArm.pivot.rotation.z = 0.35;
+        person.leftArm.joint.rotation.x = -0.18;
+      }
 
       // 被擊中=大後仰苦臉;暈眩=左右搖晃
       const stunned = rider.stunT < this._stunDur();

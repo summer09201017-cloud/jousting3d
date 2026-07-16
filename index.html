@@ -126,6 +126,7 @@
           <p>出手: 點畫面或空白鍵</p>
           <p>蓄力大招: 長按出手 0.6 秒放開,發出刀光波動!</p>
           <p>跳殺 / 飛殺: 衝刺一小段後按出手——遠=飛身躍撲,近=閃電突進!</p>
+          <p>格擋: 按住 K / C / 舉盾鈕——正面擋箭無傷、擋刀減傷;剛舉盾瞬間被打=完美盾反!</p>
           <p>前進 / 後退: W / S(↑ / ↓)</p>
           <p>左轉 / 右轉: A / D(← / →)</p>
           <p>自動面向: 敵人靠近自動轉身對準(A/D 或衝刺時不干預)</p>
@@ -144,6 +145,7 @@
         </div>
         <div class="action-pad">
           <button data-action="shoot" class="shoot">出手</button>
+          <button data-action="action">舉盾</button>
           <button data-action="sprint" class="sprint">衝刺</button>
           <button data-action="switch">換武器</button>
           <button data-action="camera">視角</button>
@@ -202,6 +204,13 @@
                 <option value="easy">入門</option>
                 <option value="normal">標準</option>
                 <option value="hard">職業</option>
+              </select>
+
+              <label class="field-label" for="characterSelect">騎士人選(選傑洛或喬尼,對手自動變另一位)</label>
+              <select id="characterSelect">
+                <option value="default">紅騎士(預設)</option>
+                <option value="gyro">傑洛·齊貝林——寬簷帽+金牙+綠披風</option>
+                <option value="johnny">喬尼·喬斯達——白毛帽+星星+馬蹄鐵</option>
               </select>
 
               <label class="field-label" for="weaponSelect">起手武器(戰鬥中可用 1-8 / Q 隨時更換)</label>

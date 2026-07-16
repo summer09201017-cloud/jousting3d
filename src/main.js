@@ -44,6 +44,7 @@ const ui = {
   menuDifficultySelect: document.querySelector("#menuDifficultySelect"),
   horseCoatSelect: document.querySelector("#horseCoatSelect"),
   weaponSelect: document.querySelector("#weaponSelect"),
+  characterSelect: document.querySelector("#characterSelect"),
   weaponSideLabel: document.querySelector("#weaponSideLabel"),
   bigPowerLabel: document.querySelector("#bigPowerLabel"),
   weaponBar: document.querySelector("#weaponBar"),
@@ -70,6 +71,7 @@ let selectedModeId = game.modeId;
 let selectedDifficulty = game.difficulty;
 let selectedCoat = game.coatId;
 let selectedWeapon = game.weaponId;
+let selectedCharacter = game.characterId;
 let audioEnabled = settings.audioEnabled !== false;
 
 function persistSettings() {
@@ -78,6 +80,7 @@ function persistSettings() {
     modeId: selectedModeId,
     horseCoat: selectedCoat,
     weaponId: selectedWeapon,
+    character: selectedCharacter,
     audioEnabled,
   });
 }
@@ -110,6 +113,7 @@ function syncMenuControls() {
   ui.menuDifficultySelect.value = selectedDifficulty;
   ui.horseCoatSelect.value = selectedCoat;
   ui.weaponSelect.value = selectedWeapon;
+  ui.characterSelect.value = selectedCharacter;
   syncMenuCards();
 }
 
@@ -118,6 +122,7 @@ function syncGameConfigurationToMenu() {
   selectedDifficulty = game.difficulty;
   selectedCoat = game.coatId;
   selectedWeapon = game.weaponId;
+  selectedCharacter = game.characterId;
   syncMenuControls();
 }
 
@@ -204,6 +209,28 @@ function handleGameEvent(event) {
       audio.swish();
       audio.vibrate([20, 10, 40]);
       pushCommentary("飛殺——閃電突進!", "hot", "飛殺,快如閃電!");
+      break;
+    }
+    case "block": {
+      audio.rebound();
+      audio.thud(0.4);
+      audio.vibrate(18);
+      if (event.who === "me") {
+        pushCommentary("舉盾格擋——擋下來了!", "info", "舉盾格擋,擋下來了!");
+      } else {
+        pushCommentary("被對手舉盾擋下——繞到側面打!", "cool", "對手舉盾,繞到側面打!");
+      }
+      break;
+    }
+    case "parry": {
+      audio.scoreSting();
+      audio.rebound();
+      audio.vibrate([30, 20, 50]);
+      if (event.who === "me") {
+        pushCommentary("完美盾反!對手被彈開!", "hot", "完美盾反,對手被彈開!");
+      } else {
+        pushCommentary("被對手盾反彈開——小心他的節奏!", "cool");
+      }
       break;
     }
     case "ai-charging": {
@@ -341,6 +368,14 @@ ui.weaponSelect.addEventListener("change", (event) => {
   persistSettings();
 });
 
+ui.characterSelect.addEventListener("change", (event) => {
+  unlockAudio();
+  audio.uiTap();
+  selectedCharacter = event.target.value;
+  game.setCharacter(selectedCharacter);
+  persistSettings();
+});
+
 ui.weaponBar.addEventListener("click", (event) => {
   const chip = event.target.closest(".weapon-chip");
   if (!chip) return;
@@ -362,6 +397,7 @@ ui.startMatchButton.addEventListener("click", () => {
     modeId: selectedModeId,
     horseCoat: selectedCoat,
     weaponId: selectedWeapon,
+    character: selectedCharacter,
   });
   game.startSelectedMatch();
   closeHomeScreen();
