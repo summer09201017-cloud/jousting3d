@@ -81,6 +81,10 @@ const CHARGE_MIN = 0.6;
 const CHARGE_FULL = 1.5;
 const WAVE_COLORS = { chop: 0xfff3b0, spin: 0xff9a3d, lunge: 0x6fd8ff, bow: 0xffe14d, greenballs: 0x5aff6e };
 
+// 自動面向敵人(07-16 使用者點名:轉向太花時間):敵人進此距離,玩家沒在手動轉向/衝刺時
+// 自動把身體轉向對手;出手瞬間在攻距內更直接轉身面對再判定。
+const AUTO_FACE_RANGE = 12;
+
 // ---------- 競技場常數 ----------
 const ARENA_HALF = 25; // 可騎乘範圍(±m)
 const BODY_REACH = 1.1; // 馬身+臂展的基礎出手距離
@@ -951,6 +955,13 @@ export class JoustingGame {
     rider.strikeT = 0;
     this.roundNo += 1;
 
+    // 出手瞬間自動轉向(玩家輔助):對手在攻距內就先把身體轉向他再判定,不用手動對準
+    if (isPlayer) {
+      const snapDist = rider.pos.distanceTo(target.pos);
+      const inSnapRange = w.ranged ? snapDist <= w.maxRange : snapDist <= w.reach + BODY_REACH + 1.2;
+      if (inSnapRange) rider.heading = Math.atan2(target.pos.x - rider.pos.x, target.pos.z - rider.pos.z);
+    }
+
     if (w.ranged) {
       const volley = w.volley || 1;
       for (let i = 0; i < volley; i += 1) {
@@ -1004,6 +1015,10 @@ export class JoustingGame {
     rider.cd = w.cd * 2.2 * (isPlayer ? 1 : preset.aiCd); // 大招冷卻加倍
     rider.strikeT = 0; // 播大揮擊動畫
     this.roundNo += 1;
+    // 大招自動瞄準(玩家輔助):波動朝敵人方向發出
+    if (isPlayer && rider.pos.distanceTo(target.pos) <= 28) {
+      rider.heading = Math.atan2(target.pos.x - rider.pos.x, target.pos.z - rider.pos.z);
+    }
     let dmg = w.dmg * (1.4 + 1.1 * charge01); // 蓄越滿越痛(1.4x~2.5x)
     dmg *= isPlayer ? 1 + preset.assist * 0.6 : preset.aiDmg;
     this._fireWave(rider, target, w, Math.round(dmg));
@@ -1284,6 +1299,20 @@ export class JoustingGame {
       if (rider.chargeT >= 0) target *= 0.5; // 蓄力中放慢(大招有重量感)
       const turn = (this.input.isDown("left") ? 1 : 0) - (this.input.isDown("right") ? 1 : 0);
       rider.heading += turn * preset.turnRate * dt;
+      // 自動面向敵人:近距離自動轉身對準;手動轉向(A/D)或衝刺逃跑時不干預;
+      // 高速背對(騎馬離開)也不硬拉回來,只有慢下來纏鬥時才鎖定
+      if (turn === 0 && !this.input.isDown("sprint") && this.foe.koT < 0) {
+        const dxF = this.foe.pos.x - rider.pos.x;
+        const dzF = this.foe.pos.z - rider.pos.z;
+        const distF = Math.hypot(dxF, dzF);
+        if (distF <= AUTO_FACE_RANGE) {
+          const diff = wrapAngle(Math.atan2(dxF, dzF) - rider.heading);
+          if (Math.abs(diff) <= 2.0 || Math.abs(rider.speed) < preset.maxFwd * 0.45) {
+            const maxTurn = preset.turnRate * 1.15 * dt;
+            rider.heading += clamp(diff, -maxTurn, maxTurn);
+          }
+        }
+      }
     }
     const rate = target < rider.speed ? 4.5 : 2.6; // 煞車比加速快
     rider.speed += (target - rider.speed) * Math.min(1, dt * rate);
