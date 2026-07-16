@@ -75,6 +75,12 @@ export const WEAPONS = {
 // 揮擊「接觸瞬間」(秒)——傷害/盾閃/慢動作在這一刻才發生,看得見打到身上
 const CONTACT_AT = { chop: 0.24, spin: 0.3, lunge: 0.22 };
 
+// 蓄力大招(07-16 使用者點名):長按出手鍵蓄力,放開發出「刀光/劍光/武器波動」飛行斬擊波。
+// CHARGE_MIN=成招門檻(短按<此值=普通攻擊);CHARGE_FULL=滿蓄;被打會中斷蓄力。
+const CHARGE_MIN = 0.6;
+const CHARGE_FULL = 1.5;
+const WAVE_COLORS = { chop: 0xfff3b0, spin: 0xff9a3d, lunge: 0x6fd8ff, bow: 0xffe14d, greenballs: 0x5aff6e };
+
 // ---------- 競技場常數 ----------
 const ARENA_HALF = 25; // 可騎乘範圍(±m)
 const BODY_REACH = 1.1; // 馬身+臂展的基礎出手距離
@@ -752,10 +758,18 @@ export class JoustingGame {
     person.group.position.set(0, 0.82, 0.12);
     person.group.scale.setScalar(0.95);
     horse.rig.add(person.group);
+    // 蓄力光圈(腳下金圈,蓄力時亮起放大)
+    const chargeRing = new THREE.Mesh(
+      new THREE.RingGeometry(0.9, 1.25, 28),
+      new THREE.MeshBasicMaterial({ color: 0xffd24a, transparent: true, opacity: 0, side: THREE.DoubleSide }),
+    );
+    chargeRing.rotation.x = -Math.PI / 2;
+    chargeRing.position.y = 0.06;
+    horse.group.add(chargeRing);
     return {
-      horse, person, gear,
+      horse, person, gear, chargeRing,
       pos: new THREE.Vector3(), heading: 0, speed: 0,
-      hp: 100, weaponId: "lance", cd: 0,
+      hp: 100, weaponId: "lance", cd: 0, chargeT: -1,
       strikeT: 9, hitT: 9, stunT: 9, koT: -1, gallopT: 0,
     };
   }
@@ -772,6 +786,7 @@ export class JoustingGame {
       rider.hitT = 9;
       rider.stunT = 9;
       rider.koT = -1;
+      rider.chargeT = -1;
       rider.person.group.rotation.z = 0;
       rider.person.group.position.set(0, 0.82, 0.12);
     }
@@ -789,6 +804,8 @@ export class JoustingGame {
       this.foe.brain.retreatT = 0;
       this.foe.brain.switchT = 5 + Math.random() * 4;
       this.foe.brain.orbitDir = Math.random() < 0.5 ? -1 : 1;
+      this.foe.brain.superT = 8 + Math.random() * 6; // AI 大招節拍
+      this.foe.brain.superHold = 0;
     }
     this.syncRiderTransforms();
     // 鏡頭硬切到玩家後方(lerp 穿場鐵則)
@@ -844,9 +861,37 @@ export class JoustingGame {
   setupInput() {
     this.canvas.addEventListener("pointerdown", (event) => {
       event.preventDefault();
-      this.strike();
+      this._shootPress();
     });
+    // 放開在 window 上聽:手指/滑鼠拖出畫布外也收得到
+    window.addEventListener("pointerup", () => this._shootRelease());
+    window.addEventListener("pointercancel", () => this._shootRelease());
     this.canvas.addEventListener("contextmenu", (event) => event.preventDefault());
+  }
+
+  // 按下出手:開戰/開始蓄力(短按放開=普攻,長按=大招)
+  _shootPress() {
+    if (this.overlay.visible) return;
+    if (this.phase === "gate") {
+      this.strike();
+      return;
+    }
+    if (this.phase !== "battle" || this.my.koT >= 0 || this.endT >= 0) return;
+    if (this.my.cd > 0 || this.my.stunT < this._stunDur()) return;
+    if (this.my.chargeT < 0) this.my.chargeT = 0;
+  }
+
+  // 放開出手:蓄滿=大招(刀光/劍光/波動),沒蓄滿=普通攻擊
+  _shootRelease() {
+    if (this.my.chargeT < 0) return;
+    const c = this.my.chargeT;
+    this.my.chargeT = -1;
+    if (this.phase !== "battle" || this.my.koT >= 0) return;
+    if (c >= CHARGE_MIN) {
+      this.superAttack(this.my, this.foe, clamp((c - CHARGE_MIN) / (CHARGE_FULL - CHARGE_MIN), 0, 1));
+    } else {
+      this.attack(this.my, this.foe);
+    }
   }
 
   // ---------- 局面控制 ----------
@@ -950,6 +995,56 @@ export class JoustingGame {
     return 1.1; // 鋼球暈眩秒數(stunT < 此值=暈眩中)
   }
 
+  // ---------- 蓄力大招:放出「刀光/劍光/武器波動」飛行斬擊波 ----------
+  superAttack(rider, target, charge01) {
+    if (this.phase !== "battle" || this.endT >= 0 || rider.koT >= 0) return;
+    const w = WEAPONS[rider.weaponId];
+    const preset = DIFFICULTY_PRESETS[this.difficulty];
+    const isPlayer = rider === this.my;
+    rider.cd = w.cd * 2.2 * (isPlayer ? 1 : preset.aiCd); // 大招冷卻加倍
+    rider.strikeT = 0; // 播大揮擊動畫
+    this.roundNo += 1;
+    let dmg = w.dmg * (1.4 + 1.1 * charge01); // 蓄越滿越痛(1.4x~2.5x)
+    dmg *= isPlayer ? 1 + preset.assist * 0.6 : preset.aiDmg;
+    this._fireWave(rider, target, w, Math.round(dmg));
+    this.emitEvent("super", { who: isPlayer ? "me" : "ai", weapon: w.label });
+    this.message = isPlayer
+      ? `蓄力大招——${w.label}波動出鞘!`
+      : `對手放出${w.label}大招波動——快閃開!`;
+    this.pushHud();
+  }
+
+  _fireWave(rider, target, w, dmg) {
+    // 斬擊波:發光新月弧,沿馬頭朝向直飛(垂直=劈系劍光,水平=迴旋刀光)
+    const color = WAVE_COLORS[w.swing] || WAVE_COLORS[rider.weaponId] || 0xfff3b0;
+    const wave = new THREE.Group();
+    const arcMesh = new THREE.Mesh(
+      new THREE.TorusGeometry(1.35, 0.18, 10, 26, Math.PI * 0.95),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1 }),
+    );
+    arcMesh.rotation.z = Math.PI * 0.03;
+    const glow = new THREE.Mesh(
+      new THREE.TorusGeometry(1.35, 0.44, 10, 26, Math.PI * 0.95),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.55 }),
+    );
+    glow.rotation.z = Math.PI * 0.03;
+    wave.add(arcMesh);
+    wave.add(glow);
+    if (w.swing === "spin") wave.rotation.z = Math.PI / 2; // 橫掃=水平刀光
+    const fwd = new THREE.Vector3(Math.sin(rider.heading), 0, Math.cos(rider.heading));
+    wave.position.copy(rider.pos).setY(2.0).addScaledVector(fwd, 1.4);
+    wave.rotation.y = rider.heading;
+    this.scene.add(wave);
+    this.projectiles.push({
+      mesh: wave, vel: fwd.multiplyScalar(16), t: 0,
+      dmg, stun: rider.weaponId === "greenballs" ? 1.4 : 0,
+      target,
+      who: rider === this.my ? "me" : "ai",
+      weapon: w,
+      isWave: true, hitR: 1.8, life: 1.3,
+    });
+  }
+
   _queueShot(rider, target, w, delay) {
     // 由 update 消化的延遲發射佇列(雙鋼球兩顆連投)
     this._shotQueue = this._shotQueue || [];
@@ -1015,6 +1110,7 @@ export class JoustingGame {
     target.hp = Math.max(0, target.hp - dmg);
     target.hitT = 0;
     if (stun) target.stunT = 0;
+    target.chargeT = -1; // 被打中斷蓄力(反制大招的方法)
     // 撞退一小步(打擊感,幅度小,兒童安全)
     target.speed *= 0.4;
     this.hitFlash.position.copy(target.pos).setY(1.9);
@@ -1153,6 +1249,9 @@ export class JoustingGame {
       rider.strikeT += sdt;
       rider.cd = Math.max(0, rider.cd - sdt);
       if (rider.koT >= 0) rider.koT += delta;
+      if (rider.chargeT >= 0 && this.phase === "battle" && !paused) {
+        rider.chargeT = Math.min(CHARGE_FULL, rider.chargeT + sdt);
+      }
     }
 
     this.handleKeys();
@@ -1182,6 +1281,7 @@ export class JoustingGame {
     if (!stunned) {
       if (this.input.isDown("up")) target = preset.maxFwd + (this.input.isDown("sprint") ? preset.boost : 0);
       else if (this.input.isDown("down")) target = rider.speed > 0.6 ? 0 : -MAX_BACK;
+      if (rider.chargeT >= 0) target *= 0.5; // 蓄力中放慢(大招有重量感)
       const turn = (this.input.isDown("left") ? 1 : 0) - (this.input.isDown("right") ? 1 : 0);
       rider.heading += turn * preset.turnRate * dt;
     }
@@ -1279,12 +1379,34 @@ export class JoustingGame {
     }
     if (stunned) desiredSpeed = 0;
 
+    if (rider.chargeT >= 0) desiredSpeed *= 0.25; // AI 蓄力時明顯減速=玩家的閃避/打斷窗
+
     const angDiff = wrapAngle(desiredHeading - rider.heading);
     const maxTurn = preset.turnRate * preset.aiSpd * dt;
     rider.heading += clamp(angDiff, -maxTurn, maxTurn);
     rider.speed += (desiredSpeed * clamp(1 - Math.abs(angDiff) / Math.PI, 0.25, 1) - rider.speed) * Math.min(1, dt * 2.4);
     this.movePos(rider, dt);
     rider.gallopT += dt * (Math.abs(rider.speed) / 8);
+
+    // 大招腦:定時蓄力放波動(蓄力有預告,玩家可閃可打斷)
+    brain.superT -= dt;
+    if (rider.chargeT >= 0) {
+      if (rider.chargeT >= brain.superHold) {
+        const c01 = clamp((rider.chargeT - CHARGE_MIN) / (CHARGE_FULL - CHARGE_MIN), 0, 1);
+        rider.chargeT = -1;
+        this.superAttack(rider, this.my, c01);
+      }
+      return; // 蓄力中不做普攻
+    }
+    if (!this.mode.passive && !stunned && rider.cd <= 0 && brain.superT <= 0 && dist >= 5 && dist <= 18) {
+      brain.superT = 9 + Math.random() * 7;
+      brain.superHold = CHARGE_MIN + 0.35 + Math.random() * 0.5;
+      rider.chargeT = 0;
+      this.emitEvent("ai-charging", {});
+      this.message = "對手在蓄力大招——快閃開或打斷他!";
+      this.pushHud();
+      return;
+    }
 
     // 出手腦(練習場不出手)
     if (this.mode.passive || stunned || rider.cd > 0) return;
@@ -1319,19 +1441,28 @@ export class JoustingGame {
     }
     for (const p of this.projectiles) {
       p.t += dt;
-      p.vel.y -= (p.isBall ? 6.5 : 1.8) * dt;
-      p.mesh.position.addScaledVector(p.vel, dt);
-      if (!p.isBall) p.mesh.lookAt(p.mesh.position.clone().add(p.vel));
-      // 命中判定(只打對方)
+      if (p.isWave) {
+        // 斬擊波:直飛不落地,邊飛邊放大+旋轉刀光+脈動發光
+        p.mesh.position.addScaledVector(p.vel, dt);
+        const s = 1.15 + p.t * 0.8 + Math.sin(p.t * 18) * 0.06;
+        p.mesh.scale.setScalar(s);
+        for (const c of p.mesh.children) c.rotation.z += dt * 5.5; // 新月刀光旋轉,遠看也醒目
+        p.mesh.children[1].material.opacity = 0.55 * (1 - (p.t / p.life) * 0.7);
+      } else {
+        p.vel.y -= (p.isBall ? 6.5 : 1.8) * dt;
+        p.mesh.position.addScaledVector(p.vel, dt);
+        if (!p.isBall) p.mesh.lookAt(p.mesh.position.clone().add(p.vel));
+      }
+      // 命中判定(只打對方;波動判定半徑較大)
       if (!p.done && p.target.koT < 0) {
-        const chest = p.target.pos.clone().setY(1.8);
-        if (p.mesh.position.distanceTo(chest) < 1.25) {
+        const chest = p.target.pos.clone().setY(p.isWave ? 2.0 : 1.8);
+        if (p.mesh.position.distanceTo(chest) < (p.hitR || 1.25)) {
           p.done = true;
           p.remove = true;
           this.applyHit(p.target, p.dmg, { who: p.who, weapon: p.weapon, stun: p.stun });
         }
       }
-      if (p.mesh.position.y <= 0.05 || p.t > 3.5) p.remove = true;
+      if (p.isWave ? p.t > p.life : (p.mesh.position.y <= 0.05 || p.t > 3.5)) p.remove = true;
     }
     for (const p of this.projectiles.filter((x) => x.remove)) this.scene.remove(p.mesh);
     this.projectiles = this.projectiles.filter((x) => !x.remove);
@@ -1340,8 +1471,9 @@ export class JoustingGame {
   handleKeys() {
     if (this.input.consumePress("camera")) this.cycleCameraView();
     if (this.input.consumePress("pause")) this.togglePause();
+    if (this.input.consumeRelease("shoot")) this._shootRelease(); // 放開一定要收到(即使暫停)
     if (this.overlay.visible) return;
-    if (this.input.consumePress("shoot")) this.strike();
+    if (this.input.consumePress("shoot")) this._shootPress();
     if (this.input.consumePress("switch")) this.cyclePlayerWeapon();
     for (let i = 0; i < WEAPON_ORDER.length; i += 1) {
       if (this.input.consumePress(`weapon${i + 1}`)) this.setPlayerWeapon(WEAPON_ORDER[i]);
@@ -1429,6 +1561,18 @@ export class JoustingGame {
             strikeLean = 0.35 * (1 - k);
           }
         }
+      }
+      // 蓄力演出:武器高舉發抖+腳下金圈亮起放大(蓄越滿越亮)
+      if (rider.chargeT >= 0) {
+        const c01 = clamp(rider.chargeT / CHARGE_FULL, 0, 1);
+        armX = -2.3 + Math.sin(this.time * 26) * 0.07 * (0.5 + c01);
+        armJ = -0.1;
+        rigY = 0;
+        weaponZ = 0.1;
+        rider.chargeRing.material.opacity = 0.25 + c01 * 0.6;
+        rider.chargeRing.scale.setScalar(0.7 + c01 * 0.9);
+      } else {
+        rider.chargeRing.material.opacity = 0;
       }
       person.rightArm.pivot.rotation.x = armX;
       person.rightArm.joint.rotation.x = armJ;
@@ -1524,6 +1668,9 @@ export class JoustingGame {
       weaponHint: w.hint,
       weaponReady01: ready01,
       weaponReady: this.my.cd <= 0,
+      charging: this.my.chargeT >= 0,
+      charge01: this.my.chargeT >= 0 ? clamp(this.my.chargeT / CHARGE_FULL, 0, 1) : 0,
+      chargeReady: this.my.chargeT >= CHARGE_MIN,
       inReach,
       gapText: this.phase === "battle" ? `${dist.toFixed(1)} m` : "—",
       lastHit: this.lastHit,

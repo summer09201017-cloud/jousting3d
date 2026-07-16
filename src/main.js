@@ -183,6 +183,22 @@ function handleGameEvent(event) {
       }
       break;
     }
+    case "super": {
+      audio.scoreSting();
+      audio.swish();
+      audio.vibrate([40, 20, 60]);
+      if (event.who === "me") {
+        pushCommentary(`蓄力大招——${event.weapon}波動出鞘!`, "hot", "蓄力大招,刀光出鞘!");
+      } else {
+        pushCommentary(`對手放出${event.weapon}大招波動——快閃開!`, "cool", "對手放出大招波動,快閃開!");
+      }
+      break;
+    }
+    case "ai-charging": {
+      audio.rebound();
+      pushCommentary("對手在蓄力大招——快閃開或打斷他!", "cool", "對手在蓄力,快閃開!");
+      break;
+    }
     case "weapon-switch": {
       audio.uiTap();
       if (event.who === "me") {
@@ -253,8 +269,10 @@ game.onHudUpdate = (state) => {
   ui.speedLabel.textContent = state.speedText;
   ui.speedMeterText.textContent = state.speedText;
   setMeterFill(ui.speedMeterFill, state.speed01);
-  ui.windowValue.textContent = state.weaponReady ? (state.inReach ? "可出手!" : "冷卻好了,靠近!") : "冷卻中…";
-  setMeterFill(ui.windowFill, state.weaponReady01);
+  ui.windowValue.textContent = state.charging
+    ? (state.chargeReady ? "放開出大招!" : "蓄力中…")
+    : state.weaponReady ? (state.inReach ? "可出手!" : "冷卻好了,靠近!") : "冷卻中…";
+  setMeterFill(ui.windowFill, state.charging ? state.charge01 : state.weaponReady01);
   { // 1-8 武器條:出戰準備+激戰中顯示,高亮當前武器
     const inFight = state.phaseLabel === "激戰中" || state.phaseLabel === "出戰準備";
     ui.weaponBar.hidden = !inFight;
@@ -268,9 +286,9 @@ game.onHudUpdate = (state) => {
     const bp = document.getElementById("bigPower"), bf = document.getElementById("bigPowerFill");
     if (bp) {
       bp.hidden = state.phaseLabel !== "激戰中";
-      if (ui.bigPowerLabel) ui.bigPowerLabel.textContent = `${state.weaponShort}出手`;
-      bf.style.transform = `scaleX(${Math.min(1, state.weaponReady01)})`;
-      bf.classList.toggle("full", state.weaponReady && state.inReach);
+      if (ui.bigPowerLabel) ui.bigPowerLabel.textContent = state.charging ? "蓄力大招" : `${state.weaponShort}出手`;
+      bf.style.transform = `scaleX(${Math.min(1, state.charging ? state.charge01 : state.weaponReady01)})`;
+      bf.classList.toggle("full", state.charging ? state.chargeReady : (state.weaponReady && state.inReach));
     }
   }
   syncOverlay(state.overlay);
