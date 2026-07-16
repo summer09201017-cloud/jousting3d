@@ -271,6 +271,12 @@ export const CHARACTERS = {
   default: { label: "紅騎士(預設)" },
   gyro: { label: "傑洛·齊貝林", shirt: 0x7a4db8, pants: 0x4a3a2e, hair: 0xe6c95c },
   johnny: { label: "喬尼·喬斯達", shirt: 0xf2f0ec, pants: 0xf2f0ec, hair: 0xe6c95c },
+  diego: { label: "迪亞哥·布蘭度", shirt: 0x2f8f8a, pants: 0x24404c, hair: 0xe6c95c }, // 青綠騎師服+DIO 帽字(07-17 移植 equestrian nf21)
+};
+// 角色技能表(race-stage-kit ⑤):傑洛=鋼球已是第 8 號武器;喬尼=爪彈;迪亞哥=THE WORLD 時停
+export const CHARACTER_SKILLS = {
+  johnny: { label: "爪彈", cd: 8 },
+  diego: { label: "THE WORLD", cd: 16 },
 };
 
 function makeStar(radius, color) {
@@ -319,6 +325,41 @@ function makeCharacterPerson(charId, scale) {
     const chestStar = makeStar(0.1, 0x2f4fa8);
     chestStar.position.set(0, 1.54, 0.171);
     person.rig.add(chestStar);
+  } else if (charId === "diego") {
+    // 迪亞哥:青綠騎師帽(圓頂+前簷)+細 45° 交叉黃菱格+帽上黃色立體 DIO 字(equestrian nf21 定稿)
+    const capMat = new THREE.MeshStandardMaterial({ color: 0x2f8f8a, roughness: 0.6 });
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.268, 16, 10, 0, Math.PI * 2, 0, Math.PI * 0.5), capMat);
+    cap.position.y = 2.2;
+    person.rig.add(cap);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.035, 0.2), capMat);
+    brim.position.set(0, 2.2, 0.3);
+    person.rig.add(brim);
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xf6d743, roughness: 0.65 });
+    for (const tilt of [Math.PI / 4, -Math.PI / 4]) {
+      for (const sy of [1.16, 1.34, 1.52]) {
+        const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.016, 0.345), stripeMat);
+        stripe.position.set(0, sy, 0);
+        stripe.rotation.z = tilt;
+        person.rig.add(stripe);
+      }
+    }
+    const dioMat = new THREE.MeshStandardMaterial({ color: 0xf6d743, roughness: 0.4, emissive: 0x6a5a10, emissiveIntensity: 0.5 });
+    const dio = new THREE.Group();
+    const dBar = new THREE.Mesh(new THREE.BoxGeometry(0.024, 0.11, 0.03), dioMat);
+    dBar.position.set(-0.105, 0, 0);
+    dio.add(dBar);
+    const dArc = new THREE.Mesh(new THREE.TorusGeometry(0.042, 0.015, 8, 12, Math.PI), dioMat);
+    dArc.rotation.z = -Math.PI / 2;
+    dArc.position.set(-0.098, 0, 0);
+    dio.add(dArc);
+    const iBar = new THREE.Mesh(new THREE.BoxGeometry(0.026, 0.11, 0.03), dioMat);
+    dio.add(iBar);
+    const oRing = new THREE.Mesh(new THREE.TorusGeometry(0.044, 0.016, 8, 14), dioMat);
+    oRing.position.set(0.098, 0, 0);
+    dio.add(oRing);
+    dio.position.set(0, 2.315, 0.235);
+    dio.rotation.x = -0.42;
+    person.rig.add(dio);
   } else {
     // 傑洛:棕寬簷帽+深帽帶+下顎環鬍+金牙笑(原生嘴關掉,不然變雙嘴)+兩片綠披風
     person.smile.visible = false;
@@ -356,6 +397,23 @@ function makeCharacterPerson(charId, scale) {
     }
   }
   return person;
+}
+
+// 黃金迴旋:發射爪彈瞬間,馬身環繞金色長方形面板旋轉 1.4s(equestrian nf21 移植)
+function makeGoldenSpin() {
+  const group = new THREE.Group();
+  const mats = [];
+  for (let i = 0; i < 8; i += 1) {
+    const mat = new THREE.MeshBasicMaterial({ color: 0xf2c14e, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+    mats.push(mat);
+    const panel = new THREE.Mesh(new THREE.PlaneGeometry(0.62, 0.34), mat);
+    const a = (i / 8) * Math.PI * 2;
+    panel.position.set(Math.cos(a) * 1.45, 1.5 + (i % 2) * 0.45, Math.sin(a) * 1.45);
+    panel.rotation.y = -a + Math.PI / 2;
+    panel.rotation.x = 0.18;
+    group.add(panel);
+  }
+  return { group, mats };
 }
 
 // ---------- 馬(長腿 v3+鬃毛三件套;coatMat/maneMat 可換色) ----------
@@ -699,6 +757,10 @@ export class JoustingGame {
     this.roundNo = 0; // 「回合」=雙方出手總次數(大戰三百回合!)
     this.lastHit = null; // {who, dmg, weapon} 顯示上一擊
     this.projectiles = [];
+    this.spinFx = []; // 黃金迴旋
+    this.myTimeStop = 0; // THE WORLD(玩家發動:對手凍結)
+    this.foeTimeStop = 0; // AI 迪亞哥發動:你被凍結
+    this.foeCharacterId = null;
     this._pendingStrikes = []; // 近戰接觸瞬間結算佇列
     this._shotQueue = [];
     this.hitCamT = 9; // 命中慢動作/特寫計時
@@ -743,6 +805,7 @@ export class JoustingGame {
     const key = new THREE.DirectionalLight(0xfff2d4, 1.9);
     key.position.set(30, 50, -20);
     this.scene.add(key);
+    this.keyLight = key;
     const rim = new THREE.DirectionalLight(0x9ccbff, 0.6);
     rim.position.set(-25, 30, 25);
     this.scene.add(rim);
@@ -846,6 +909,10 @@ export class JoustingGame {
     this.scene.add(this.hitFlash);
     this.hitFlashT = 9;
 
+    // ---------- 天氣氛圍(race-stage-kit ④:純視覺不影響比賽鐵則) ----------
+    // 日夜循環+夜間極光+飄雪陣風;競技場小,極光環半徑 70-105 > 場地 25 即安全
+    this.buildWeather();
+
     this.resetRiders();
   }
 
@@ -856,7 +923,9 @@ export class JoustingGame {
     if (this.foe) this.scene.remove(this.foe.horse.group);
     const coat = HORSE_COATS[this.coatId] || HORSE_COATS.brown;
     const pc = this.characterId === "default" ? null : this.characterId;
-    const foeChar = pc === "gyro" ? "johnny" : pc === "johnny" ? "gyro" : null;
+    const pool = ["gyro", "johnny", "diego"].filter((c) => c !== pc);
+    const foeChar = pc ? pool[Math.floor(Math.random() * pool.length)] : null;
+    this.foeCharacterId = foeChar;
     this.my = this.makeRider({
       coat: coat.coat, mane: coat.mane, caparison: 0xb03030,
       shirt: 0xb03030, pants: 0x5a2a2a, team: 0xb03030, plume: 0xf6d743,
@@ -907,7 +976,7 @@ export class JoustingGame {
       horse, person, gear, chargeRing,
       pos: new THREE.Vector3(), heading: 0, speed: 0,
       hp: 100, weaponId: "lance", cd: 0, chargeT: -1,
-      sprintT: 0, techCd: 0, leap: null, dash: null, airY: 0,
+      sprintT: 0, techCd: 0, charCd: 0, leap: null, dash: null, airY: 0,
       blocking: false, blockT: 9,
       strikeT: 9, hitT: 9, stunT: 9, koT: -1, gallopT: 0,
     };
@@ -928,6 +997,7 @@ export class JoustingGame {
       rider.chargeT = -1;
       rider.sprintT = 0;
       rider.techCd = 0;
+      rider.charCd = 0;
       rider.leap = null;
       rider.dash = null;
       rider.airY = 0;
@@ -942,6 +1012,11 @@ export class JoustingGame {
     this.hitCamT = 9;
     for (const p of this.projectiles) this.scene.remove(p.mesh);
     this.projectiles = [];
+    for (const fx of this.spinFx) fx.host.rig.remove(fx.group);
+    this.spinFx = [];
+    this.myTimeStop = 0;
+    this.foeTimeStop = 0;
+    this.canvas.style.filter = "";
     this._shotQueue = [];
     this._pendingStrikes = [];
     this.setRiderWeapon(this.my, this.weaponId);
@@ -1554,18 +1629,212 @@ export class JoustingGame {
     this.renderer.render(this.scene, this.camera);
   }
 
+  buildWeather() {
+    // 極光三簾(加法混色:底亮綠→頂近黑=自然淡出;頂點 alpha 這版 three 不生效——race-stage-kit 兩雷)
+    const AUR = [
+      { r: 85, y: 42, h: 26, a0: -Math.PI, a1: Math.PI, phase: 0, speed: 0.5 },
+      { r: 105, y: 56, h: 32, a0: -Math.PI * 0.9, a1: Math.PI * 0.35, phase: 2.1, speed: 0.38 },
+      { r: 70, y: 34, h: 20, a0: -Math.PI * 0.1, a1: Math.PI * 0.95, phase: 4.2, speed: 0.66 },
+    ];
+    const SEGS = 64;
+    this.aurora = { group: new THREE.Group(), curtains: [] };
+    for (const cfg of AUR) {
+      const pos = new Float32Array((SEGS + 1) * 2 * 3);
+      const col = new Float32Array((SEGS + 1) * 2 * 3);
+      const idx = [];
+      for (let i = 0; i <= SEGS; i += 1) {
+        const a = cfg.a0 + (cfg.a1 - cfg.a0) * (i / SEGS);
+        const x = Math.cos(a) * cfg.r;
+        const z = Math.sin(a) * cfg.r;
+        pos[(i * 2) * 3] = x; pos[(i * 2) * 3 + 1] = cfg.y; pos[(i * 2) * 3 + 2] = z;
+        col[(i * 2) * 3] = 0.15; col[(i * 2) * 3 + 1] = 0.85; col[(i * 2) * 3 + 2] = 0.45;
+        pos[(i * 2 + 1) * 3] = x; pos[(i * 2 + 1) * 3 + 1] = cfg.y + cfg.h; pos[(i * 2 + 1) * 3 + 2] = z;
+        col[(i * 2 + 1) * 3] = 0.09; col[(i * 2 + 1) * 3 + 1] = 0.02; col[(i * 2 + 1) * 3 + 2] = 0.16;
+        if (i < SEGS) { const b = i * 2; idx.push(b, b + 2, b + 1, b + 1, b + 2, b + 3); }
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+      geo.setIndex(idx);
+      const mesh = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, fog: false }));
+      this.aurora.group.add(mesh);
+      this.aurora.curtains.push({ mesh, base: pos.slice(), phase: cfg.phase, speed: cfg.speed });
+    }
+    this.aurora.group.visible = false;
+    this.scene.add(this.aurora.group);
+    // 飄雪粒子(場地 ±30 盒,wrap)
+    const N = 420;
+    const spos = new Float32Array(N * 3);
+    for (let i = 0; i < N; i += 1) {
+      spos[i * 3] = (Math.random() - 0.5) * 60;
+      spos[i * 3 + 1] = Math.random() * 20;
+      spos[i * 3 + 2] = (Math.random() - 0.5) * 60;
+    }
+    const sgeo = new THREE.BufferGeometry();
+    sgeo.setAttribute("position", new THREE.BufferAttribute(spos, 3));
+    this.snowFx = {
+      pts: new THREE.Points(sgeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.22, transparent: true, opacity: 0.7, depthWrite: false, fog: false })),
+      speeds: Float32Array.from({ length: N }, () => 3 + Math.random() * 3),
+    };
+    this.scene.add(this.snowFx.pts);
+    this.blizzardWarned = false;
+  }
+
+  dayHours() { // 遊戲一天=50 秒,選單/戰鬥都在流動
+    return (6 + this.time * (24 / 50)) % 24;
+  }
+
+  updateWeather(delta) {
+    // 日夜天色(race-stage-kit ③;夜=深藍 0x0a2050)
+    const KEYS = [
+      [0, 0x0a2050, 0.35], [5, 0x0a2050, 0.35], [6.5, 0xf0955f, 1.1],
+      [9, 0x8fc4e8, 1.9], [16, 0x8fc4e8, 1.9], [18.5, 0xf0854f, 1.0],
+      [20, 0x0a2050, 0.35], [24, 0x0a2050, 0.35],
+    ];
+    const h = this.dayHours();
+    let a = KEYS[0], b = KEYS[KEYS.length - 1];
+    for (let i = 0; i < KEYS.length - 1; i += 1) {
+      if (h >= KEYS[i][0] && h <= KEYS[i + 1][0]) { a = KEYS[i]; b = KEYS[i + 1]; break; }
+    }
+    const t = (h - a[0]) / (b[0] - a[0] || 1);
+    const ca = new THREE.Color(a[1]).lerp(new THREE.Color(b[1]), t);
+    this.scene.background = ca;
+    if (this.keyLight) this.keyLight.intensity = a[2] + (b[2] - a[2]) * t;
+    // 陣風飄雪(純視覺):~52 秒一波白茫
+    const gust = Math.max(0, Math.min(1, (Math.sin(this.time * 0.12) - 0.55) / 0.45));
+    if (this.scene.fog) {
+      this.scene.fog.color.copy(ca);
+      this.scene.fog.near = 70 - 44 * gust;
+      this.scene.fog.far = 180 - 100 * gust;
+    }
+    if (gust > 0.5 && !this.blizzardWarned) {
+      this.blizzardWarned = true;
+      this.message = "暴風雪來了——白茫一片,看緊對手!";
+      this.pushHud();
+    }
+    if (gust < 0.2) this.blizzardWarned = false;
+    if (this.snowFx) {
+      const attr = this.snowFx.pts.geometry.getAttribute("position");
+      const windX = (1.2 + 7 * gust) * delta;
+      for (let i = 0; i < attr.count; i += 1) {
+        attr.array[i * 3 + 1] -= this.snowFx.speeds[i] * (1 + gust * 1.6) * delta;
+        attr.array[i * 3] += windX * (0.6 + (i % 5) * 0.2);
+        if (attr.array[i * 3 + 1] < 0) attr.array[i * 3 + 1] = 20;
+        if (attr.array[i * 3] > 30) attr.array[i * 3] = -30;
+        if (attr.array[i * 3 + 2] > 30) attr.array[i * 3 + 2] = -30;
+        if (attr.array[i * 3 + 2] < -30) attr.array[i * 3 + 2] = 30;
+      }
+      attr.needsUpdate = true;
+      this.snowFx.pts.material.opacity = 0.55 + 0.45 * gust;
+    }
+    // 夜間極光(19.5 淡入/5.5 淡出+頂點波動=流動)
+    if (this.aurora) {
+      let nf = 0;
+      if (h >= 20.5 || h <= 4.5) nf = 1;
+      else if (h > 19.5 && h < 20.5) nf = h - 19.5;
+      else if (h > 4.5 && h < 5.5) nf = 5.5 - h;
+      this.aurora.group.visible = nf > 0.02;
+      if (this.aurora.group.visible) {
+        for (const c of this.aurora.curtains) {
+          c.mesh.material.opacity = nf * 0.65;
+          const attr = c.mesh.geometry.getAttribute("position");
+          for (let i = 0; i < attr.count / 2; i += 1) {
+            const sway = Math.sin(i * 0.32 + this.time * c.speed + c.phase) * 4;
+            const swayTop = Math.sin(i * 0.32 + this.time * c.speed * 1.35 + c.phase + 0.9) * 7;
+            attr.array[(i * 2) * 3] = c.base[(i * 2) * 3] + sway;
+            attr.array[(i * 2 + 1) * 3] = c.base[(i * 2 + 1) * 3] + swayTop;
+          }
+          attr.needsUpdate = true;
+        }
+      }
+    }
+    // 黃金迴旋動畫
+    for (const fx of this.spinFx) {
+      fx.t += delta;
+      fx.group.rotation.y += 7 * delta;
+      const fade = fx.t > 1.0 ? Math.max(0, 1 - (fx.t - 1.0) / 0.4) : 1;
+      for (const m of fx.mats) m.opacity = 0.9 * fade;
+    }
+    this.spinFx = this.spinFx.filter((fx) => {
+      if (fx.t >= 1.4) { fx.host.rig.remove(fx.group); return false; }
+      return true;
+    });
+  }
+
+  // ---------- 角色技能(G 鍵/技能鈕;race-stage-kit ⑤) ----------
+  _tryCharSkill() {
+    if (this.phase !== "battle" || this.overlay.visible) return;
+    if (this.foeTimeStop > 0) return; // 你的時間被停了
+    const ch = this.characterId === "default" ? null : this.characterId;
+    if (!ch) { this.message = "紅騎士沒有替身技能——選傑洛/喬尼/迪亞哥!"; this.pushHud(); return; }
+    if (ch === "gyro") { this.message = "傑洛的鋼球=第 8 號武器「雙綠鋼球」,直接切著丟!"; this.pushHud(); return; }
+    if (this.my.charCd > 0) { this.message = `${CHARACTER_SKILLS[ch].label}回轉中……還要 ${this.my.charCd.toFixed(1)} 秒`; this.pushHud(); return; }
+    if (ch === "johnny") {
+      this.my.charCd = CHARACTER_SKILLS.johnny.cd;
+      this._fireNail(this.my, this.foe);
+      this._spawnGoldenSpin(this.my);
+      this.message = "喬尼射出爪彈——黃金迴旋!";
+    } else if (ch === "diego") {
+      this.my.charCd = CHARACTER_SKILLS.diego.cd;
+      this.myTimeStop = 4;
+      this.canvas.style.filter = "grayscale(1) contrast(1.08)";
+      this.message = "迪亞哥:THE WORLD!時間停止 4 秒——只有你能動!";
+    }
+    this.pushHud();
+  }
+
+  _spawnGoldenSpin(rider) {
+    const fx = makeGoldenSpin();
+    rider.horse.rig.add(fx.group);
+    this.spinFx.push({ group: fx.group, mats: fx.mats, t: 0, host: rider.horse });
+  }
+
+  _fireNail(shooter, target) {
+    const from = shooter.pos.clone().setY(2.0);
+    const targetPoint = target.pos.clone().setY(1.7);
+    const dir = targetPoint.clone().sub(from).normalize();
+    const vel = dir.multiplyScalar(30);
+    const mesh = new THREE.Group();
+    const core = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.07, 0.3, 4, 8),
+      new THREE.MeshStandardMaterial({ color: 0x2f7fe0, roughness: 0.3, metalness: 0.4, emissive: 0x1a4fa0, emissiveIntensity: 0.8 }),
+    );
+    core.rotation.x = Math.PI / 2;
+    mesh.add(core);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.025, 6, 14), new THREE.MeshBasicMaterial({ color: 0x7fd4ff, transparent: true, opacity: 0.9 }));
+    mesh.add(ring);
+    mesh.position.copy(from);
+    mesh.lookAt(from.clone().add(vel));
+    this.scene.add(mesh);
+    this.projectiles.push({
+      mesh, vel, t: 0, dmg: 14, stun: 0, target,
+      who: shooter === this.my ? "me" : "ai",
+      weapon: { label: "爪彈", short: "爪彈", projSpeed: 30, maxRange: 48 },
+    });
+  }
+
   update(delta) {
     this.time += delta;
     const paused = this.overlay.visible;
+    this.updateWeather(delta); // 天氣=純視覺,選單也流動
 
     // 命中瞬間慢動作(0.4s,打擊感)
     this._slowMo = !paused && this.hitCamT < 0.4 ? 0.42 : 1;
     const sdt = delta * this._slowMo;
 
     if (!paused && this.phase === "battle") {
-      this.updatePlayerMovement(sdt);
-      this.updateAi(sdt); // 練習場 AI 仍走位(只是不出手)
-      this.updateProjectiles(sdt);
+      // THE WORLD 計時與復原
+      if (this.myTimeStop > 0) {
+        this.myTimeStop -= delta;
+        if (this.myTimeStop <= 0 && this.foeTimeStop <= 0) { this.canvas.style.filter = ""; this.message = "時間再次流動。"; this.pushHud(); }
+      }
+      if (this.foeTimeStop > 0) {
+        this.foeTimeStop -= delta;
+        if (this.foeTimeStop <= 0 && this.myTimeStop <= 0) { this.canvas.style.filter = ""; this.message = "時間再次流動——反擊!"; this.pushHud(); }
+      }
+      if (this.foeTimeStop <= 0) this.updatePlayerMovement(sdt); // 被時停=你動不了
+      if (this.myTimeStop <= 0) this.updateAi(sdt); // 你時停=對手凍結
+      if (this.myTimeStop <= 0 && this.foeTimeStop <= 0) this.updateProjectiles(sdt); // 時停中飛行物懸停
       this.resolveBodyPush();
       this.syncRiderTransforms();
 
@@ -1711,6 +1980,27 @@ export class JoustingGame {
 
   // ---------- AI 騎士(npc-ai-kit 對手 AI 三式:擬人走位+換武器+出手) ----------
   updateAi(dt) {
+    // AI 角色技能(對手隨機騎另外兩位;冷卻長,溫柔版)
+    const chF = this.foeCharacterId;
+    if (chF && CHARACTER_SKILLS[chF] && this.phase === "battle" && this.foe.koT < 0 && this.my.koT < 0 && this.myTimeStop <= 0 && this.foeTimeStop <= 0) {
+      this.foe.charCd = Math.max(0, (this.foe.charCd || 0) - dt);
+      const dCh = this.foe.pos.distanceTo(this.my.pos);
+      if (this.foe.charCd <= 0) {
+        if (chF === "johnny" && dCh > 7 && dCh < 24) {
+          this.foe.charCd = 12;
+          this._fireNail(this.foe, this.my);
+          this._spawnGoldenSpin(this.foe);
+          this.message = "對面的喬尼射出爪彈——小心!";
+          this.pushHud();
+        } else if (chF === "diego" && dCh < 9) {
+          this.foe.charCd = 20;
+          this.foeTimeStop = 2.5;
+          this.canvas.style.filter = "grayscale(1) contrast(1.08)";
+          this.message = "對面的迪亞哥:THE WORLD!你被時停了!";
+          this.pushHud();
+        }
+      }
+    }
     const rider = this.foe;
     if (rider.koT >= 0) {
       rider.speed += (0 - rider.speed) * Math.min(1, dt * 3);
@@ -1901,6 +2191,7 @@ export class JoustingGame {
     if (this.input.consumeRelease("shoot")) this._shootRelease(); // 放開一定要收到(即使暫停)
     if (this.overlay.visible) return;
     if (this.input.consumePress("shoot")) this._shootPress();
+    if (this.input.consumePress("charskill")) this._tryCharSkill(); // G=角色技能
     if (this.input.consumePress("leap")) this._tryTech("leap"); // E=跳殺
     if (this.input.consumePress("dashkill")) this._tryTech("dash"); // R=飛殺
     if (this.input.consumePress("switch")) this.cyclePlayerWeapon();

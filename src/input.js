@@ -12,6 +12,7 @@ const KEY_BINDINGS = {
   KeyK: "action",
   KeyC: "action",
   KeyE: "leap",
+  KeyG: "charskill",
   KeyR: "dashkill",
   KeyL: "switch",
   KeyQ: "switch",
