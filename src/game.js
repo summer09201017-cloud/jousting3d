@@ -710,7 +710,7 @@ function knightUp(person, teamColor, plumeColor, withHelm = true) {
     const gripWrap = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.22, 8), teamMat);
     gripWrap.position.x = 0.6;
     bow.add(gripWrap);
-    bow.rotation.y = Math.PI / 2; // 弓面朝前
+    bow.rotation.y = -Math.PI / 2; // 弓背朝對手、弦朝自己(07-17 修:原本反了)
     weapons.bow = mount(bow);
   }
   { // 雙綠鋼球(手握一顆+備用一顆;投出時另生成)
