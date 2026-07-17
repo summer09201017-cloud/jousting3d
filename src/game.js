@@ -1016,6 +1016,7 @@ export class JoustingGame {
     this.spinFx = [];
     this.myTimeStop = 0;
     this.foeTimeStop = 0;
+    this._setWorldGray(false);
     this.canvas.style.filter = "";
     this._shotQueue = [];
     this._pendingStrikes = [];
@@ -1486,6 +1487,78 @@ export class JoustingGame {
     return "block";
   }
 
+  // THE WORLD 世界抽色(07-17 使用者拍板:時停時只有迪亞哥有顏色)——
+  // CSS filter 會把施放者一起變灰,改成材質級抽色:全場材質轉灰階、只跳過 keepGroup(施放者)。
+  _setWorldGray(on, keepGroup) {
+    const lum = (hex) => {
+      const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
+      const v = Math.round(r * 0.299 + g * 0.587 + b * 0.114);
+      return (v << 16) | (v << 8) | v;
+    };
+    if (on) {
+      if (this._tsGray) return; // 已抽色(雙方連放保險)
+      this._tsGray = { mats: [], inst: [], vtx: [], bg: null, fog: null };
+      const seen = new Set();
+      this.scene.traverse((o) => {
+        let keep = false;
+        for (let q = o; q; q = q.parent) if (q === keepGroup) { keep = true; break; }
+        if (keep || !o.isMesh || !o.material) return;
+        if (o.isInstancedMesh && o.instanceColor) { // 觀眾等 instanced 色也要抽
+          this._tsGray.inst.push({ mesh: o, orig: o.instanceColor.array.slice() });
+          const a = o.instanceColor.array;
+          for (let i = 0; i < a.length; i += 3) {
+            const v = a[i] * 0.299 + a[i + 1] * 0.587 + a[i + 2] * 0.114;
+            a[i] = v; a[i + 1] = v; a[i + 2] = v;
+          }
+          o.instanceColor.needsUpdate = true;
+        }
+        if (o.geometry?.attributes?.color) { // 地形帶/彩帶等 vertex colors 也要抽
+          this._tsGray.vtx.push({ geo: o.geometry, orig: o.geometry.attributes.color.array.slice() });
+          const c = o.geometry.attributes.color.array;
+          const n = o.geometry.attributes.color.itemSize; // 3 或 4(RGBA 只動前三)
+          for (let i = 0; i < c.length; i += n) {
+            const v = c[i] * 0.299 + c[i + 1] * 0.587 + c[i + 2] * 0.114;
+            c[i] = v; c[i + 1] = v; c[i + 2] = v;
+          }
+          o.geometry.attributes.color.needsUpdate = true;
+        }
+        for (const m of (Array.isArray(o.material) ? o.material : [o.material])) {
+          if (seen.has(m)) continue;
+          seen.add(m);
+          const rec = { m, color: m.color ? m.color.getHex() : null, emissive: m.emissive ? m.emissive.getHex() : null };
+          this._tsGray.mats.push(rec);
+          if (m.color) m.color.setHex(lum(rec.color));
+          if (m.emissive) m.emissive.setHex(lum(rec.emissive));
+        }
+      });
+      if (this.scene.background && this.scene.background.isColor) {
+        this._tsGray.bg = this.scene.background.getHex();
+        this.scene.background.setHex(lum(this._tsGray.bg));
+      }
+      if (this.scene.fog) {
+        this._tsGray.fog = this.scene.fog.color.getHex();
+        this.scene.fog.color.setHex(lum(this._tsGray.fog));
+      }
+    } else {
+      if (!this._tsGray) return;
+      for (const rec of this._tsGray.mats) {
+        if (rec.color !== null) rec.m.color.setHex(rec.color);
+        if (rec.emissive !== null) rec.m.emissive.setHex(rec.emissive);
+      }
+      for (const it of this._tsGray.inst) {
+        it.mesh.instanceColor.array.set(it.orig);
+        it.mesh.instanceColor.needsUpdate = true;
+      }
+      for (const it of this._tsGray.vtx) {
+        it.geo.attributes.color.array.set(it.orig);
+        it.geo.attributes.color.needsUpdate = true;
+      }
+      if (this._tsGray.bg !== null && this.scene.background?.isColor) this.scene.background.setHex(this._tsGray.bg);
+      if (this._tsGray.fog !== null && this.scene.fog) this.scene.fog.color.setHex(this._tsGray.fog);
+      this._tsGray = null;
+    }
+  }
+
   applyHit(target, dmg, { who, weapon, stun, attacker, from, kind }) {
     if (this.phase !== "battle" || target.koT >= 0 || this.endT >= 0) return;
     const src = from || (attacker ? attacker.pos : null);
@@ -1685,6 +1758,7 @@ export class JoustingGame {
   }
 
   updateWeather(delta) {
+    if (this._tsGray) return; // THE WORLD 時停中:天空/極光凍結(日夜 lerp 會蓋掉世界抽色)
     // 日夜天色(race-stage-kit ③;夜=深藍 0x0a2050)
     const KEYS = [
       [0, 0x0a2050, 0.35], [5, 0x0a2050, 0.35], [6.5, 0xf0955f, 1.1],
@@ -1777,7 +1851,7 @@ export class JoustingGame {
     } else if (ch === "diego") {
       this.my.charCd = CHARACTER_SKILLS.diego.cd;
       this.myTimeStop = 4;
-      this.canvas.style.filter = "grayscale(1) contrast(1.08)";
+      this._setWorldGray(true, this.my.horse.group); // 世界抽色,只有我(迪亞哥)有顏色
       this.message = "迪亞哥:THE WORLD!時間停止 4 秒——只有你能動!";
     }
     this.pushHud();
@@ -1826,11 +1900,11 @@ export class JoustingGame {
       // THE WORLD 計時與復原
       if (this.myTimeStop > 0) {
         this.myTimeStop -= delta;
-        if (this.myTimeStop <= 0 && this.foeTimeStop <= 0) { this.canvas.style.filter = ""; this.message = "時間再次流動。"; this.pushHud(); }
+        if (this.myTimeStop <= 0 && this.foeTimeStop <= 0) { this._setWorldGray(false); this.message = "時間再次流動。"; this.pushHud(); }
       }
       if (this.foeTimeStop > 0) {
         this.foeTimeStop -= delta;
-        if (this.foeTimeStop <= 0 && this.myTimeStop <= 0) { this.canvas.style.filter = ""; this.message = "時間再次流動——反擊!"; this.pushHud(); }
+        if (this.foeTimeStop <= 0 && this.myTimeStop <= 0) { this._setWorldGray(false); this.message = "時間再次流動——反擊!"; this.pushHud(); }
       }
       if (this.foeTimeStop <= 0) this.updatePlayerMovement(sdt); // 被時停=你動不了
       if (this.myTimeStop <= 0) this.updateAi(sdt); // 你時停=對手凍結
@@ -1995,7 +2069,7 @@ export class JoustingGame {
         } else if (chF === "diego" && dCh < 9) {
           this.foe.charCd = 20;
           this.foeTimeStop = 2.5;
-          this.canvas.style.filter = "grayscale(1) contrast(1.08)";
+          this._setWorldGray(true, this.foe.horse.group); // 世界抽色,只有對面迪亞哥有顏色
           this.message = "對面的迪亞哥:THE WORLD!你被時停了!";
           this.pushHud();
         }
