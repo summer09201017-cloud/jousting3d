@@ -1487,13 +1487,16 @@ export class JoustingGame {
     return "block";
   }
 
-  // THE WORLD 世界抽色(07-17 使用者拍板:時停時只有迪亞哥有顏色)——
+  // THE WORLD 世界抽復古黃(07-18:時停=老照片泛黃,只有迪亞哥有顏色)——
   // CSS filter 會把施放者一起變灰,改成材質級抽色:全場材質轉灰階、只跳過 keepGroup(施放者)。
   _setWorldGray(on, keepGroup) {
-    const lum = (hex) => {
+    const lum = (hex) => { // 復古泛黃 sepia(07-18 使用者拍板:時停從黑白改成老照片黃)
       const r = (hex >> 16) & 255, g = (hex >> 8) & 255, b = hex & 255;
-      const v = Math.round(r * 0.299 + g * 0.587 + b * 0.114);
-      return (v << 16) | (v << 8) | v;
+      const v = r * 0.299 + g * 0.587 + b * 0.114;
+      const tr = Math.min(255, Math.round(v * 1.25));
+      const tg = Math.min(255, Math.round(v * 1.06));
+      const tb = Math.round(v * 0.66);
+      return (tr << 16) | (tg << 8) | tb;
     };
     if (on) {
       if (this._tsGray) return; // 已抽色(雙方連放保險)
@@ -1508,7 +1511,7 @@ export class JoustingGame {
           const a = o.instanceColor.array;
           for (let i = 0; i < a.length; i += 3) {
             const v = a[i] * 0.299 + a[i + 1] * 0.587 + a[i + 2] * 0.114;
-            a[i] = v; a[i + 1] = v; a[i + 2] = v;
+            a[i] = Math.min(1, v * 1.25); a[i + 1] = Math.min(1, v * 1.06); a[i + 2] = v * 0.66;
           }
           o.instanceColor.needsUpdate = true;
         }
@@ -1518,7 +1521,7 @@ export class JoustingGame {
           const n = o.geometry.attributes.color.itemSize; // 3 或 4(RGBA 只動前三)
           for (let i = 0; i < c.length; i += n) {
             const v = c[i] * 0.299 + c[i + 1] * 0.587 + c[i + 2] * 0.114;
-            c[i] = v; c[i + 1] = v; c[i + 2] = v;
+            c[i] = Math.min(1, v * 1.25); c[i + 1] = Math.min(1, v * 1.06); c[i + 2] = v * 0.66;
           }
           o.geometry.attributes.color.needsUpdate = true;
         }
