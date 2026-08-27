@@ -1,7 +1,7 @@
 import * as THREE from "three";
 import { InputManager } from "./input.js";
 import { loadSettings, saveSettings, loadSavedGame, saveGameState } from "./storage.js";
-import { animateIdleHead, animateCrowdCheer, EAR_SAFE_PHI } from "./idle-life.js";
+import { animateIdleHead, animateCrowdCheer, EAR_SAFE_PHI, crowdCheer } from "./idle-life.js";
 
 // —— 3D 騎士比武(jousting3d,德義武鬥館)——2026-07-16 大改版:自由騎控馬戰(武鬥制)。
 // 使用者拍板:①兩騎自由走位——馬可前進/後退/原地轉向,不再只有單向對衝 ②拆掉中間分隔柵,
@@ -1917,7 +1917,7 @@ export class JoustingGame {
     const paused = this.overlay.visible;
     this.updateWeather(delta); // 天氣=純視覺,選單也流動
     // 觀眾歡呼人浪(舉手+左右看,相位錯開;THE WORLD 時停中觀眾也凍結)
-    if (!this._tsGray) animateCrowdCheer(this.crowdFigures, this.time);
+    if (!this._tsGray) animateCrowdCheer(this.crowdFigures, this.time, { cheer: crowdCheer(this).stepAt(this.time) });
 
     // 命中瞬間慢動作(0.4s,打擊感)
     this._slowMo = !paused && this.hitCamT < 0.4 ? 0.42 : 1;
